@@ -1,0 +1,154 @@
+/* ToastContainer.css - Notificaciones y Alertas Globales de Aitems */
+
+.app-toast-container {
+  position: fixed;
+  top: max(16px, env(safe-area-inset-top, 16px));
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 32px);
+  max-width: 440px;
+  z-index: 999999; /* Por encima de cualquier modal o header */
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+/* Banner individual de alerta: limpio, profesional, 100% responsive */
+.app-toast-banner {
+  pointer-events: auto;
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #ffffff;
+  border-radius: 14px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 
+    0 10px 25px -4px rgba(15, 23, 42, 0.10),
+    0 4px 10px -2px rgba(15, 23, 42, 0.04);
+  animation: toastBannerSlide 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.app-toast-banner:hover {
+  box-shadow: 
+    0 12px 28px -4px rgba(15, 23, 42, 0.14),
+    0 4px 12px -2px rgba(15, 23, 42, 0.06);
+}
+
+/* Badge circular del ícono - sutil y armonioso */
+.toast-badge {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.toast-badge.success {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.toast-badge.error {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.toast-badge.warning {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.toast-badge.info {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.toast-icon-svg {
+  display: block;
+}
+
+/* Cuerpo de texto */
+.toast-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toast-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.25;
+}
+
+.toast-message {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #334155;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+/* Botón de cierre */
+.toast-close-btn {
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 6px;
+  cursor: pointer;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.toast-close-btn:hover {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+/* Animación de entrada suave desde arriba */
+@keyframes toastBannerSlide {
+  from {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Ajustes mobile */
+@media (max-width: 480px) {
+  .app-toast-container {
+    width: calc(100% - 24px);
+    top: max(14px, env(safe-area-inset-top, 14px));
+  }
+
+  .app-toast-banner {
+    padding: 10px 12px;
+    gap: 10px;
+    border-radius: 12px;
+  }
+
+  .toast-badge {
+    width: 30px;
+    height: 30px;
+  }
+
+  .toast-message {
+    font-size: 13px;
+  }
+}
