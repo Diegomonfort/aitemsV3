@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Search, 
   Check, 
-  Users
+  Users,
+  Loader2
 } from 'lucide-react';
+import BottomSheet from './BottomSheet';
+import { useToast } from '../context/ToastContext';
 
 export default function SharePropertyModal({
   isOpen,
@@ -14,52 +17,28 @@ export default function SharePropertyModal({
   agency,
   onUpdateSharedWith,
 }) {
+  const toast = useToast();
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   
+  const normalizeAgentIds = (list) => {
+    if (!Array.isArray(list)) return [];
+    return list
+      .map(item => (typeof item === 'object' && item !== null ? item.id : item))
+      .filter(Boolean);
+  };
+
   // Los que ya están compartidos aparecen seleccionados
   const [selectedAgentIds, setSelectedAgentIds] = useState(() => {
     const list = property?.shared_users || property?.sharedUsers || property?.sharedWith;
-    return Array.isArray(list) ? list : [];
+    return normalizeAgentIds(list);
   });
 
   // Sincronizar si cambia la propiedad abierta
-  React.useEffect(() => {
+  useEffect(() => {
     const list = property?.shared_users || property?.sharedUsers || property?.sharedWith;
-    if (Array.isArray(list)) {
-      setSelectedAgentIds(list);
-    }
-  }, [property?.id, property?.shared_users, property?.sharedUsers]);
-
-  // Bloquear scroll de fondo mientras esté abierto
-  React.useEffect(() => {
-    if (!isOpen) return;
-    document.documentElement.classList.add('app-modal-open');
-    document.body.classList.add('app-modal-open');
-
-    const scrollContainers = document.querySelectorAll('main, .app-detail-main, .app-main-content, .app-container');
-    const prevStyles = [];
-    scrollContainers.forEach(el => {
-      prevStyles.push({
-        el,
-        overflow: el.style.overflow,
-        overflowY: el.style.overflowY,
-        touchAction: el.style.touchAction
-      });
-      el.style.overflow = 'hidden';
-      el.style.overflowY = 'hidden';
-      el.style.touchAction = 'none';
-    });
-
-    return () => {
-      document.documentElement.classList.remove('app-modal-open');
-      document.body.classList.remove('app-modal-open');
-      prevStyles.forEach(({ el, overflow, overflowY, touchAction }) => {
-        el.style.overflow = overflow;
-        el.style.overflowY = overflowY;
-        el.style.touchAction = touchAction;
-      });
-    };
-  }, [isOpen]);
+    setSelectedAgentIds(normalizeAgentIds(list));
+  }, [property?.id, property?.shared_users, property?.sharedUsers, property?.sharedWith]);
 
   if (!isOpen || !property) return null;
 
@@ -71,13 +50,41 @@ export default function SharePropertyModal({
   });
 
   const handleToggleColleague = (agentId) => {
-    const nextSelected = selectedAgentIds.includes(agentId)
-      ? selectedAgentIds.filter(id => id !== agentId)
+    if (isSaving) return;
+    const strId = String(agentId);
+    const isSelected = selectedAgentIds.some(id => String(id) === strId);
+    const nextSelected = isSelected
+      ? selectedAgentIds.filter(id => String(id) !== strId)
       : [...selectedAgentIds, agentId];
 
     setSelectedAgentIds(nextSelected);
-    if (onUpdateSharedWith) {
-      onUpdateSharedWith(property.id, nextSelected);
+  };
+
+  const handleSaveAndClose = async () => {
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      if (onUpdateSharedWith) {
+        await onUpdateSharedWith(property.id, selectedAgentIds);
+      }
+
+      const count = selectedAgentIds.length;
+      if (count === 0) {
+        toast.info('Propiedad configurada como privada (sin compartir)');
+      } else if (count === 1) {
+        const agent = agents.find(a => String(a.id) === String(selectedAgentIds[0]));
+        const agentName = agent?.name || '1 colega';
+        toast.success(`Propiedad compartida con ${agentName}`);
+      } else {
+        toast.success(`Propiedad compartida con ${count} colegas`);
+      }
+
+      onClose();
+    } catch (err) {
+      console.error('Error al guardar usuarios compartidos:', err);
+      toast.error(err?.message || 'No se pudo guardar la configuración de compartir');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -95,35 +102,15 @@ export default function SharePropertyModal({
   };
 
   return (
-    <div className="app-modal-backdrop" onClick={onClose}>
-      <div 
-        className="app-modal-sheet" 
-        onClick={(e) => e.stopPropagation()}
-        style={styles.sheetOverride}
-      >
-        {/* Handle de arrastre superior centrado */}
-        <div style={styles.handleWrapper}>
-          <div className="app-modal-handle" style={styles.handle} />
-        </div>
-
-        {/* Encabezado */}
-        <div style={styles.header}>
-          <div style={styles.headerText}>
-            <h3 style={styles.title}>Compartir propiedad</h3>
-            <p style={styles.subtitle}>{property.name}</p>
-          </div>
-
-          <button 
-            type="button" 
-            style={styles.closeBtn} 
-            onClick={onClose}
-            aria-label="Cerrar modal"
-          >
-            <X size={16} color="#64748b" />
-          </button>
-        </div>
-
-        <div className="app-modal-content-body no-scrollbar" style={styles.body}>
+    <BottomSheet
+      isOpen={isOpen}
+      onClose={() => {
+        if (!isSaving) onClose();
+      }}
+      title="Compartir propiedad"
+      subtitle={property.name}
+      size="auto"
+    >
           {/* Buscador de colegas por nombre */}
           <div style={styles.searchBox}>
             <Search size={15} color="#94a3b8" style={{ flexShrink: 0 }} />
@@ -133,7 +120,6 @@ export default function SharePropertyModal({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               style={styles.searchInput}
-              autoFocus
             />
             {searchQuery && (
               <button 
@@ -161,7 +147,7 @@ export default function SharePropertyModal({
           {filteredColleagues.length > 0 ? (
             <div style={styles.colleaguesCard}>
               {filteredColleagues.map((agent, index) => {
-                const isSelected = selectedAgentIds.includes(agent.id);
+                const isSelected = selectedAgentIds.some(id => String(id) === String(agent.id));
                 const palette = getAvatarPalette(agent.name);
                 const initials = (agent.name || 'Agente')
                   .split(' ')
@@ -175,11 +161,12 @@ export default function SharePropertyModal({
                 return (
                   <div 
                     key={agent.id}
-                    onClick={() => handleToggleColleague(agent.id)}
+                    onClick={() => !isSaving && handleToggleColleague(agent.id)}
                     style={{
                       ...styles.colleagueRow,
                       ...(isSelected ? styles.colleagueRowSelected : {}),
-                      ...(isLast ? { borderBottom: 'none' } : {})
+                      ...(isLast ? { borderBottom: 'none' } : {}),
+                      ...(isSaving ? { opacity: 0.65, cursor: 'not-allowed' } : {})
                     }}
                   >
                     {/* Avatar circular */}
@@ -236,20 +223,28 @@ export default function SharePropertyModal({
               )}
             </div>
           )}
-        </div>
-
         {/* Botón de confirmación inferior */}
         <div style={styles.footer}>
           <button 
             type="button" 
-            style={styles.doneBtn}
-            onClick={onClose}
+            style={{
+              ...styles.doneBtn,
+              ...(isSaving ? styles.doneBtnDisabled : {})
+            }}
+            onClick={handleSaveAndClose}
+            disabled={isSaving}
           >
-            Listo
+            {isSaving ? (
+              <span style={styles.btnContent}>
+                <Loader2 size={16} color="#ffffff" style={{ animation: 'spin 1s linear infinite' }} />
+                <span>Guardando...</span>
+              </span>
+            ) : (
+              <span>Listo</span>
+            )}
           </button>
         </div>
-      </div>
-    </div>
+    </BottomSheet>
   );
 }
 
@@ -455,7 +450,7 @@ const styles = {
   },
   doneBtn: {
     width: '100%',
-    padding: '12px',
+    padding: '13px',
     borderRadius: '12px',
     border: 'none',
     backgroundColor: '#0f172a',
@@ -463,6 +458,19 @@ const styles = {
     fontSize: '14px',
     fontWeight: '700',
     cursor: 'pointer',
-    transition: 'background-color 0.15s ease',
+    transition: 'all 0.15s ease',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  doneBtnDisabled: {
+    opacity: 0.75,
+    cursor: 'not-allowed',
+  },
+  btnContent: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
   },
 };

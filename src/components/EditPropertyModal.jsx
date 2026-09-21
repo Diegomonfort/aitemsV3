@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { toast } from '../context/ToastContext';
 import { 
-  X, 
   Camera, 
   Trash2, 
   Loader2, 
@@ -10,6 +9,7 @@ import {
   Check 
 } from 'lucide-react';
 import { propertyService } from '../services/propertyService';
+import BottomSheet from './BottomSheet';
 
 export default function EditPropertyModal({
   isOpen,
@@ -34,37 +34,6 @@ export default function EditPropertyModal({
       setFieldErrors({});
     }
   }, [property, isOpen]);
-
-  // Bloquear scroll de fondo mientras el modal esté activo
-  useEffect(() => {
-    if (!isOpen) return;
-    document.documentElement.classList.add('app-modal-open');
-    document.body.classList.add('app-modal-open');
-
-    const scrollContainers = document.querySelectorAll('main, .app-detail-main, .app-main-content, .app-container');
-    const prevStyles = [];
-    scrollContainers.forEach(el => {
-      prevStyles.push({
-        el,
-        overflow: el.style.overflow,
-        overflowY: el.style.overflowY,
-        touchAction: el.style.touchAction
-      });
-      el.style.overflow = 'hidden';
-      el.style.overflowY = 'hidden';
-      el.style.touchAction = 'none';
-    });
-
-    return () => {
-      document.documentElement.classList.remove('app-modal-open');
-      document.body.classList.remove('app-modal-open');
-      prevStyles.forEach(({ el, overflow, overflowY, touchAction }) => {
-        el.style.overflow = overflow;
-        el.style.overflowY = overflowY;
-        el.style.touchAction = touchAction;
-      });
-    };
-  }, [isOpen]);
 
   if (!isOpen || !property) return null;
 
@@ -131,37 +100,15 @@ export default function EditPropertyModal({
   };
 
   return (
-    <div className="app-modal-backdrop" onClick={onClose}>
-      <div 
-        className="app-modal-sheet" 
-        onClick={(e) => e.stopPropagation()}
-        style={styles.sheetOverride}
-      >
-        {/* Handle superior de arrastre */}
-        <div style={styles.handleWrapper}>
-          <div className="app-modal-handle" style={styles.handle} />
-        </div>
-
-        {/* Encabezado */}
-        <div style={styles.header}>
-          <div style={styles.headerText}>
-            <h3 style={styles.title}>Editar propiedad</h3>
-            <p style={styles.subtitle}>Modificá los datos principales de la propiedad</p>
-          </div>
-
-          <button 
-            type="button" 
-            style={styles.closeBtn} 
-            onClick={onClose}
-            aria-label="Cerrar"
-          >
-            <X size={16} color="#64748b" />
-          </button>
-        </div>
-
-        {/* Formulario scrolleable */}
+    <BottomSheet
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Editar propiedad"
+      subtitle="Modificá los datos principales de la propiedad"
+      size="medium"
+    >
         <form onSubmit={handleSave} style={styles.formContainer}>
-          <div className="app-modal-content-body no-scrollbar" style={styles.body}>
+          <div style={styles.body}>
             {/* Foto de portada */}
             <div style={styles.inputStack}>
               <label style={styles.label}>Foto de portada</label>
@@ -291,8 +238,7 @@ export default function EditPropertyModal({
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </BottomSheet>
   );
 }
 

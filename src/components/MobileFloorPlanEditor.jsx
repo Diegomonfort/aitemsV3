@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { toast } from '../context/ToastContext';
 import {
   ArrowLeft,
@@ -18,7 +18,6 @@ import {
   X,
   Home,
   Copy,
-  PenTool,
   Square,
   CornerDownRight,
   ArrowUpDown,
@@ -126,10 +125,36 @@ export default function MobileFloorPlanEditor({
     hasMoved: false
   });
 
+  // Referencias para sincronización y fluidez del gesto de zoom / paneo con dos dedos
+  const scaleRef = useRef(scale);
+  const panRef = useRef(pan);
+  const pinchRef = useRef({
+    active: false,
+    startDist: 0,
+    startScale: 1,
+    startPan: { x: 0, y: 0 },
+    worldCenter: { x: 0, y: 0 }
+  });
+  const pinchJustEndedRef = useRef(0);
+  const touchCountRef = useRef(0);
+
+  useEffect(() => {
+    scaleRef.current = scale;
+  }, [scale]);
+
+  useEffect(() => {
+    panRef.current = pan;
+  }, [pan]);
+
   // Piso activo actual
-  const currentFloor = floors.find(f => f.id === activeFloorId) || floors[0];
+  const currentFloorIndex = floors.findIndex(f => f.id === activeFloorId);
+  const currentFloor = currentFloorIndex >= 0 ? floors[currentFloorIndex] : floors[0];
   const currentShapes = currentFloor?.shapes || [];
   const selectedShape = currentShapes.find(s => s.id === selectedShapeId);
+
+  // Piso inferior de referencia (papel cebolla / blueprint transparente)
+  const [showLowerFloor, setShowLowerFloor] = useState(true);
+  const lowerFloor = currentFloorIndex > 0 ? floors[currentFloorIndex - 1] : null;
 
   // Push al historial de Undo/Redo
   const pushHistory = useCallback((newFloors) => {
@@ -461,6 +486,10 @@ export default function MobileFloorPlanEditor({
 
   // ============ MANEJO DE PUNTERO (DIBUJO, DRAG Y RESIZE TÁCTIL) ============
   const handlePointerDown = (e, shapeId = null) => {
+    if (pinchRef.current.active) return;
+    if (touchCountRef.current >= 2 || (Date.now() - pinchJustEndedRef.current < 450)) return;
+    if (e.pointerType === 'touch' && e.isPrimary === false) return;
+
     const coords = getWorldCoord(e);
 
     // Modo 1: Dibujar Rectángulo con los dedos
@@ -543,9 +572,12 @@ export default function MobileFloorPlanEditor({
     }
   };
 
-  // Iniciar redimensionamiento desde el handle de esquina
-  const handleResizeHandlePointerDown = (e, shapeId) => {
+  // Iniciar redimensionamiento desde cualquier esquina o borde ('nw','ne','se','sw','n','s','e','w')
+  const handleResizeHandlePointerDown = (e, shapeId, handle = 'se') => {
     e.stopPropagation();
+    if (pinchRef.current.active) return;
+    if (e.pointerType === 'touch' && e.isPrimary === false) return;
+
     const coords = getWorldCoord(e);
     const targetShape = currentShapes.find(s => s.id === shapeId);
     if (!targetShape || targetShape.locked) return;
@@ -553,9 +585,12 @@ export default function MobileFloorPlanEditor({
     dragRef.current = {
       active: true,
       mode: 'resize',
+      handle, // 'nw' | 'ne' | 'se' | 'sw' | 'n' | 's' | 'e' | 'w'
       targetId: shapeId,
       startX: coords.rawClientX,
       startY: coords.rawClientY,
+      shapeStartX: targetShape.x,
+      shapeStartY: targetShape.y,
       shapeStartWidth: targetShape.width || 120,
       shapeStartHeight: targetShape.height || 100,
       hasMoved: false
@@ -563,6 +598,9 @@ export default function MobileFloorPlanEditor({
   };
 
   const handlePointerMove = useCallback((e) => {
+    if (pinchRef.current.active) return;
+    if (touchCountRef.current >= 2 || (Date.now() - pinchJustEndedRef.current < 450)) return;
+
     const coords = getWorldCoord(e);
 
     // Mover rectángulo en trazado
@@ -609,62 +647,104 @@ export default function MobileFloorPlanEditor({
         };
       }));
     } else if (dragRef.current.mode === 'resize') {
+      const handle = dragRef.current.handle || 'se';
       const worldDeltaX = deltaX / scale;
       const worldDeltaY = deltaY / scale;
-      const nextW = Math.max(40, snapToGrid(dragRef.current.shapeStartWidth + worldDeltaX));
-      const nextH = Math.max(40, snapToGrid(dragRef.current.shapeStartHeight + worldDeltaY));
+
+      const { shapeStartX, shapeStartY, shapeStartWidth, shapeStartHeight } = dragRef.current;
+
+      let nextX = shapeStartX;
+      let nextY = shapeStartY;
+      let nextW = shapeStartWidth;
+      let nextH = shapeStartHeight;
+
+      // Ajuste horizontal (e: lado derecho, w: lado izquierdo)
+      if (handle.includes('e')) {
+        nextW = Math.max(40, snapToGrid(shapeStartWidth + worldDeltaX));
+      } else if (handle.includes('w')) {
+        const maxDeltaX = shapeStartWidth - 40;
+        const clampedDeltaX = Math.min(worldDeltaX, maxDeltaX);
+        const snappedDeltaX = snapToGrid(clampedDeltaX);
+        nextX = shapeStartX + snappedDeltaX;
+        nextW = shapeStartWidth - snappedDeltaX;
+      }
+
+      // Ajuste vertical (s: lado inferior, n: lado superior)
+      if (handle.includes('s')) {
+        nextH = Math.max(40, snapToGrid(shapeStartHeight + worldDeltaY));
+      } else if (handle.includes('n')) {
+        const maxDeltaY = shapeStartHeight - 40;
+        const clampedDeltaY = Math.min(worldDeltaY, maxDeltaY);
+        const snappedDeltaY = snapToGrid(clampedDeltaY);
+        nextY = shapeStartY + snappedDeltaY;
+        nextH = shapeStartHeight - snappedDeltaY;
+      }
 
       setFloors(prev => prev.map(f => {
         if (f.id !== activeFloorId) return f;
         return {
           ...f,
           shapes: f.shapes.map(s => 
-            s.id === dragRef.current.targetId ? { ...s, width: nextW, height: nextH } : s
+            s.id === dragRef.current.targetId ? { ...s, x: nextX, y: nextY, width: nextW, height: nextH } : s
           )
         };
       }));
     } else if (dragRef.current.mode === 'pan') {
+      const nextPanX = dragRef.current.panStartX + deltaX;
+      const nextPanY = dragRef.current.panStartY + deltaY;
+      panRef.current = { x: nextPanX, y: nextPanY };
       setPan({
-        x: dragRef.current.panStartX + deltaX,
-        y: dragRef.current.panStartY + deltaY
+        x: nextPanX,
+        y: nextPanY
       });
     }
   }, [activeFloorId, drawingMode, pan.x, pan.y, rectDrawing, scale]);
 
   const handlePointerUp = useCallback(() => {
+    if (pinchRef.current.active || touchCountRef.current >= 2 || (Date.now() - pinchJustEndedRef.current < 450)) {
+      setRectDrawing(null);
+      setIsDragging(false);
+      dragRef.current.active = false;
+      dragRef.current.mode = 'none';
+      return;
+    }
     setIsDragging(false);
 
     // Si terminó de dibujar rectángulo
     if (drawingMode === 'rect' && rectDrawing) {
-      const x = Math.min(rectDrawing.startX, rectDrawing.currentX);
-      const y = Math.min(rectDrawing.startY, rectDrawing.currentY);
-      const width = Math.abs(rectDrawing.currentX - rectDrawing.startX);
-      const height = Math.abs(rectDrawing.currentY - rectDrawing.startY);
+      let x = Math.min(rectDrawing.startX, rectDrawing.currentX);
+      let y = Math.min(rectDrawing.startY, rectDrawing.currentY);
+      let width = Math.abs(rectDrawing.currentX - rectDrawing.startX);
+      let height = Math.abs(rectDrawing.currentY - rectDrawing.startY);
 
-      if (width >= 40 && height >= 40) {
-        const defaultColor = LIGHT_PALETTES[currentShapes.length % LIGHT_PALETTES.length];
-        const newShape = {
-          id: uid(),
-          type: 'room',
-          x,
-          y,
-          width,
-          height,
-          label: 'Nuevo Ambiente',
-          ambienteId: null,
-          noRoom: false,
-          fill: defaultColor.fill,
-          stroke: defaultColor.stroke,
-          textColor: defaultColor.text,
-          rotation: 0
-        };
-        const nextShapes = [...currentShapes, newShape];
-        updateCurrentFloorShapes(nextShapes, true);
-        setSelectedShapeId(newShape.id);
-        setIsPropsModalOpen(false);
-        setDrawingMode('none');
-        setRectDrawing(null);
+      // Si fue un toque o arrastre muy pequeño, colocar tamaño estándar (120x100)
+      if (width < 30 || height < 30) {
+        width = 120;
+        height = 100;
       }
+
+      const defaultColor = LIGHT_PALETTES[currentShapes.length % LIGHT_PALETTES.length];
+      const newShape = {
+        id: uid(),
+        type: 'room',
+        x,
+        y,
+        width,
+        height,
+        label: 'Nuevo Ambiente',
+        ambienteId: null,
+        noRoom: false,
+        fill: defaultColor.fill,
+        stroke: defaultColor.stroke,
+        textColor: defaultColor.text,
+        rotation: 0
+      };
+      const nextShapes = [...currentShapes, newShape];
+      updateCurrentFloorShapes(nextShapes, true);
+      setSelectedShapeId(newShape.id);
+      setIsPropsModalOpen(false);
+      setDrawingMode('none');
+      setRectDrawing(null);
     }
 
     if (dragRef.current.active) {
@@ -675,6 +755,164 @@ export default function MobileFloorPlanEditor({
       dragRef.current.mode = 'none';
     }
   }, [currentShapes, drawingMode, floors, pushHistory, rectDrawing, updateCurrentFloorShapes]);
+
+  // ============ GESTO MULTI-TOUCH FLUIDO (PINCH TO ZOOM + PAN CON 2 DEDOS) ============
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+
+    let rafId = null;
+
+    const onTouchStart = (e) => {
+      touchCountRef.current = e.touches.length;
+      if (e.touches.length >= 2) {
+        pinchJustEndedRef.current = Date.now();
+        setRectDrawing(null);
+
+        // Si el usuario tenía 1 dedo arrastrando una habitación, restaurarla a su posición inicial
+        if (dragRef.current.active) {
+          if (dragRef.current.mode === 'shape' && dragRef.current.targetId) {
+            const targetId = dragRef.current.targetId;
+            const startX = dragRef.current.shapeStartX;
+            const startY = dragRef.current.shapeStartY;
+            setFloors(prev => prev.map(f => {
+              if (f.id !== activeFloorId) return f;
+              return {
+                ...f,
+                shapes: f.shapes.map(s => s.id === targetId ? { ...s, x: startX, y: startY } : s)
+              };
+            }));
+          }
+          dragRef.current.active = false;
+          dragRef.current.mode = 'none';
+          setIsDragging(false);
+        }
+
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+        const rect = el.getBoundingClientRect();
+        const midX = (t1.clientX + t2.clientX) / 2 - rect.left;
+        const midY = (t1.clientY + t2.clientY) / 2 - rect.top;
+
+        const curScale = scaleRef.current;
+        const curPan = panRef.current;
+
+        // Calcular punto focal en coordenadas mundo para centrar el zoom
+        const worldX = (midX - curPan.x) / curScale;
+        const worldY = (midY - curPan.y) / curScale;
+
+        pinchRef.current = {
+          active: true,
+          startDist: Math.max(dist, 10),
+          startScale: curScale,
+          startPan: { ...curPan },
+          worldCenter: { x: worldX, y: worldY },
+        };
+
+        e.preventDefault();
+      }
+    };
+
+    const onTouchMove = (e) => {
+      touchCountRef.current = e.touches.length;
+      if (e.touches.length >= 2) {
+        pinchJustEndedRef.current = Date.now();
+        setRectDrawing(null);
+      }
+
+      if (e.touches.length >= 2 && pinchRef.current.active) {
+        e.preventDefault();
+
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+        const rect = el.getBoundingClientRect();
+        const currentMidX = (t1.clientX + t2.clientX) / 2 - rect.left;
+        const currentMidY = (t1.clientY + t2.clientY) / 2 - rect.top;
+
+        const { startDist, startScale, worldCenter } = pinchRef.current;
+        const scaleRatio = dist / startDist;
+        const nextScale = Math.min(3.5, Math.max(0.35, +(startScale * scaleRatio).toFixed(3)));
+
+        const nextPanX = Math.round(currentMidX - worldCenter.x * nextScale);
+        const nextPanY = Math.round(currentMidY - worldCenter.y * nextScale);
+
+        scaleRef.current = nextScale;
+        panRef.current = { x: nextPanX, y: nextPanY };
+
+        if (!rafId) {
+          rafId = requestAnimationFrame(() => {
+            setScale(scaleRef.current);
+            setPan(panRef.current);
+            rafId = null;
+          });
+        }
+      }
+    };
+
+    const onTouchEnd = (e) => {
+      touchCountRef.current = e.touches.length;
+      pinchJustEndedRef.current = Date.now();
+      setRectDrawing(null);
+
+      if (pinchRef.current.active && e.touches.length < 2) {
+        pinchRef.current.active = false;
+        if (rafId) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+        setScale(scaleRef.current);
+        setPan(panRef.current);
+      }
+    };
+
+    // Soporte para Trackpad y rueda en Mac / Desktop
+    const onWheel = (e) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const clientX = e.clientX - rect.left;
+      const clientY = e.clientY - rect.top;
+      const curScale = scaleRef.current;
+      const curPan = panRef.current;
+
+      if (e.ctrlKey || e.metaKey) {
+        // Gesto de zoom en trackpad
+        const zoomFactor = -e.deltaY * 0.008;
+        const nextScale = Math.min(3.5, Math.max(0.35, +(curScale * (1 + zoomFactor)).toFixed(3)));
+        const worldX = (clientX - curPan.x) / curScale;
+        const worldY = (clientY - curPan.y) / curScale;
+        const nextPanX = Math.round(clientX - worldX * nextScale);
+        const nextPanY = Math.round(clientY - worldY * nextScale);
+
+        scaleRef.current = nextScale;
+        panRef.current = { x: nextPanX, y: nextPanY };
+        setScale(nextScale);
+        setPan({ x: nextPanX, y: nextPanY });
+      } else {
+        // Desplazamiento regular con rueda o dos dedos
+        const nextPanX = Math.round(curPan.x - e.deltaX);
+        const nextPanY = Math.round(curPan.y - e.deltaY);
+        panRef.current = { x: nextPanX, y: nextPanY };
+        setPan({ x: nextPanX, y: nextPanY });
+      }
+    };
+
+    el.addEventListener('touchstart', onTouchStart, { passive: false });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: false });
+    el.addEventListener('touchcancel', onTouchEnd, { passive: false });
+    el.addEventListener('wheel', onWheel, { passive: false });
+
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+      el.removeEventListener('wheel', onWheel);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [activeFloorId]);
 
   // GUARDAR PLANO
   const handleSavePlan = () => {
@@ -980,35 +1218,6 @@ export default function MobileFloorPlanEditor({
         </div>
       )}
 
-      {drawingMode === 'polygon' && (
-        <div className="mfp-drawing-banner" style={editorStyles.drawingBanner}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <PenTool size={16} color="#4f46e5" />
-            <span style={editorStyles.drawingBannerText}>
-              Marcá esquinas en la grilla ({polygonPoints.length / 2} puntos)
-            </span>
-          </div>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            {polygonPoints.length >= 6 && (
-              <button
-                type="button"
-                style={editorStyles.finishPolyBtn}
-                onClick={handleFinishPolygon}
-              >
-                <Check size={14} />
-                <span>Cerrar</span>
-              </button>
-            )}
-            <button
-              type="button"
-              style={editorStyles.cancelPolyBtn}
-              onClick={handleCancelDrawing}
-            >
-              <X size={14} />
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* ============ 3. LIENZO SVG (CON GRILLA VINCULADA AL ZOOM Y PAN) ============ */}
       <div 
@@ -1043,6 +1252,111 @@ export default function MobileFloorPlanEditor({
             {/* Ejes centrales sutiles */}
             <line x1="-3000" y1="0" x2="4000" y2="0" stroke="#94a3b8" strokeWidth="1" strokeDasharray="6,4" />
             <line x1="0" y1="-3000" x2="0" y2="4000" stroke="#94a3b8" strokeWidth="1" strokeDasharray="6,4" />
+
+            {/* ============ CAPA GUÍA DEL PISO INFERIOR (PAPEL CEBOLLA / TRANSPARENTE) ============ */}
+            {lowerFloor && showLowerFloor && (
+              <g className="mfp-lower-floor-overlay" pointerEvents="none" opacity="0.38">
+                {/* 1. Habitaciones del piso inferior */}
+                {lowerFloor.shapes.filter(s => s.type === 'room').map(shape => {
+                  const rot = shape.rotation || 0;
+                  const cx = shape.x + shape.width / 2;
+                  const cy = shape.y + shape.height / 2;
+                  return (
+                    <g key={`lower-${shape.id}`} transform={`rotate(${rot}, ${cx}, ${cy})`}>
+                      <rect
+                        x={shape.x}
+                        y={shape.y}
+                        width={shape.width}
+                        height={shape.height}
+                        rx={6}
+                        ry={6}
+                        fill="rgba(148, 163, 184, 0.14)"
+                        stroke="#64748b"
+                        strokeWidth={2}
+                        strokeDasharray="6,4"
+                      />
+                      {!shape.noRoom && shape.width >= 30 && (
+                        <text
+                          x={cx}
+                          y={cy + 4}
+                          textAnchor="middle"
+                          fill="#475569"
+                          fontSize={11}
+                          fontWeight={700}
+                          fontFamily="Plus Jakarta Sans, sans-serif"
+                        >
+                          {getFittedLabel(shape.label || 'Ambiente', shape.width)}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+
+                {/* 2. Polígonos del piso inferior si los hubiera */}
+                {lowerFloor.shapes.filter(s => s.type === 'polygon').map(poly => {
+                  const pointsStr = [];
+                  for (let i = 0; i < poly.points.length; i += 2) {
+                    pointsStr.push(`${poly.points[i]},${poly.points[i + 1]}`);
+                  }
+                  const cx = poly.width / 2;
+                  const cy = poly.height / 2;
+                  return (
+                    <g key={`lower-${poly.id}`} transform={`translate(${poly.x}, ${poly.y}) rotate(${poly.rotation || 0}, ${cx}, ${cy})`}>
+                      <polygon
+                        points={pointsStr.join(' ')}
+                        fill="rgba(148, 163, 184, 0.14)"
+                        stroke="#64748b"
+                        strokeWidth={2}
+                        strokeDasharray="6,4"
+                      />
+                    </g>
+                  );
+                })}
+
+                {/* 3. Puertas del piso inferior */}
+                {lowerFloor.shapes.filter(s => s.type === 'door').map(door => {
+                  const r = door.width || 60;
+                  const rot = door.rotation || 0;
+                  return (
+                    <g key={`lower-${door.id}`} transform={`translate(${door.x}, ${door.y}) rotate(${rot})`}>
+                      <line x1="0" y1="0" x2={r} y2="0" stroke="#64748b" strokeWidth={2} strokeDasharray="4,2" />
+                      <path d={`M 0 0 L ${r} 0 A ${r} ${r} 0 0 1 0 ${r} Z`} fill="rgba(148, 163, 184, 0.1)" stroke="#94a3b8" strokeWidth={1} strokeDasharray="4,2" />
+                    </g>
+                  );
+                })}
+
+                {/* 4. Ventanas del piso inferior */}
+                {lowerFloor.shapes.filter(s => s.type === 'window').map(win => {
+                  const w = win.width || 80;
+                  const h = win.height || 14;
+                  const rot = win.rotation || 0;
+                  return (
+                    <g key={`lower-${win.id}`} transform={`translate(${win.x}, ${win.y}) rotate(${rot}, ${w / 2}, ${h / 2})`}>
+                      <rect x="0" y="0" width={w} height={h} fill="rgba(255, 255, 255, 0.6)" stroke="#64748b" strokeWidth={1.5} strokeDasharray="4,2" rx={2} />
+                      <line x1="3" y1={h / 2} x2={w - 3} y2={h / 2} stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="3,2" />
+                    </g>
+                  );
+                })}
+
+                {/* 5. Escaleras del piso inferior */}
+                {lowerFloor.shapes.filter(s => s.type === 'stairs').map(st => {
+                  const w = st.width || 90;
+                  const h = st.height || 60;
+                  const rot = st.rotation || 0;
+                  const steps = 6;
+                  const stepWidth = w / steps;
+                  return (
+                    <g key={`lower-${st.id}`} transform={`translate(${st.x}, ${st.y}) rotate(${rot}, ${w / 2}, ${h / 2})`}>
+                      <rect x="0" y="0" width={w} height={h} fill="rgba(148, 163, 184, 0.1)" stroke="#64748b" strokeWidth={1.5} strokeDasharray="4,2" rx={3} />
+                      {Array.from({ length: steps - 1 }).map((_, i) => (
+                        <line key={i} x1={(i + 1) * stepWidth} y1="0" x2={(i + 1) * stepWidth} y2={h} stroke="#94a3b8" strokeWidth={1} strokeDasharray="3,2" />
+                      ))}
+                      <line x1="10" y1={h / 2} x2={w - 14} y2={h / 2} stroke="#64748b" strokeWidth={1.5} strokeDasharray="3,2" />
+                    </g>
+                  );
+                })}
+              </g>
+            )}
 
             {/* 1. DIBUJO DE HABITACIONES RECTANGULARES */}
             {currentShapes.filter(s => s.type === 'room').map(shape => {
@@ -1110,21 +1424,109 @@ export default function MobileFloorPlanEditor({
                     </text>
                   )}
 
-                  {/* Indicadores de Selección y Handle de Redimensionamiento */}
+                  {/* Indicadores de Selección y Handles de Redimensionamiento (4 Esquinas + 4 Bordes) */}
                   {isSelected && (
                     <>
-                      <circle cx={shape.x} cy={shape.y} r={4.5} fill="#4f46e5" stroke="#ffffff" strokeWidth={1.5} />
-                      <circle cx={shape.x + shape.width} cy={shape.y} r={4.5} fill="#4f46e5" stroke="#ffffff" strokeWidth={1.5} />
-                      <circle cx={shape.x} cy={shape.y + shape.height} r={4.5} fill="#4f46e5" stroke="#ffffff" strokeWidth={1.5} />
-
-                      {/* Handle táctil ampliado para estirar la habitación SOLO si no está bloqueada */}
                       {!shape.locked ? (
-                        <g onPointerDown={(e) => handleResizeHandlePointerDown(e, shape.id)}>
-                          <circle cx={shape.x + shape.width} cy={shape.y + shape.height} r={24} fill="transparent" style={{ cursor: 'nwse-resize' }} />
-                          <circle cx={shape.x + shape.width} cy={shape.y + shape.height} r={7.5} fill="#4f46e5" stroke="#ffffff" strokeWidth={2.5} />
-                        </g>
+                        <>
+                          {/* --- 4 BORDES / LÍNEAS TÁCTILES (N, S, W, E) --- */}
+                          {/* 1. Borde Superior (N) */}
+                          <line 
+                            x1={shape.x + 22} y1={shape.y} 
+                            x2={shape.x + shape.width - 22} y2={shape.y} 
+                            stroke="transparent" 
+                            strokeWidth={24} 
+                            style={{ cursor: 'ns-resize' }} 
+                            onPointerDown={(e) => handleResizeHandlePointerDown(e, shape.id, 'n')} 
+                          />
+                          <rect 
+                            x={shape.x + shape.width / 2 - 12} y={shape.y - 3.5} 
+                            width={24} height={7} rx={3.5} 
+                            fill="#4f46e5" stroke="#ffffff" strokeWidth={1.5} 
+                            pointerEvents="none" 
+                          />
+
+                          {/* 2. Borde Inferior (S) */}
+                          <line 
+                            x1={shape.x + 22} y1={shape.y + shape.height} 
+                            x2={shape.x + shape.width - 22} y2={shape.y + shape.height} 
+                            stroke="transparent" 
+                            strokeWidth={24} 
+                            style={{ cursor: 'ns-resize' }} 
+                            onPointerDown={(e) => handleResizeHandlePointerDown(e, shape.id, 's')} 
+                          />
+                          <rect 
+                            x={shape.x + shape.width / 2 - 12} y={shape.y + shape.height - 3.5} 
+                            width={24} height={7} rx={3.5} 
+                            fill="#4f46e5" stroke="#ffffff" strokeWidth={1.5} 
+                            pointerEvents="none" 
+                          />
+
+                          {/* 3. Borde Izquierdo (W) */}
+                          <line 
+                            x1={shape.x} y1={shape.y + 22} 
+                            x2={shape.x} y2={shape.y + shape.height - 22} 
+                            stroke="transparent" 
+                            strokeWidth={24} 
+                            style={{ cursor: 'ew-resize' }} 
+                            onPointerDown={(e) => handleResizeHandlePointerDown(e, shape.id, 'w')} 
+                          />
+                          <rect 
+                            x={shape.x - 3.5} y={shape.y + shape.height / 2 - 12} 
+                            width={7} height={24} rx={3.5} 
+                            fill="#4f46e5" stroke="#ffffff" strokeWidth={1.5} 
+                            pointerEvents="none" 
+                          />
+
+                          {/* 4. Borde Derecho (E) */}
+                          <line 
+                            x1={shape.x + shape.width} y1={shape.y + 22} 
+                            x2={shape.x + shape.width} y2={shape.y + shape.height - 22} 
+                            stroke="transparent" 
+                            strokeWidth={24} 
+                            style={{ cursor: 'ew-resize' }} 
+                            onPointerDown={(e) => handleResizeHandlePointerDown(e, shape.id, 'e')} 
+                          />
+                          <rect 
+                            x={shape.x + shape.width - 3.5} y={shape.y + shape.height / 2 - 12} 
+                            width={7} height={24} rx={3.5} 
+                            fill="#4f46e5" stroke="#ffffff" strokeWidth={1.5} 
+                            pointerEvents="none" 
+                          />
+
+                          {/* --- LAS 4 ESQUINAS (NW, NE, SW, SE) --- */}
+                          {/* Esquina Superior-Izquierda (NW) */}
+                          <g onPointerDown={(e) => handleResizeHandlePointerDown(e, shape.id, 'nw')}>
+                            <circle cx={shape.x} cy={shape.y} r={22} fill="transparent" style={{ cursor: 'nwse-resize' }} />
+                            <circle cx={shape.x} cy={shape.y} r={7} fill="#4f46e5" stroke="#ffffff" strokeWidth={2} />
+                          </g>
+
+                          {/* Esquina Superior-Derecha (NE) */}
+                          <g onPointerDown={(e) => handleResizeHandlePointerDown(e, shape.id, 'ne')}>
+                            <circle cx={shape.x + shape.width} cy={shape.y} r={22} fill="transparent" style={{ cursor: 'nesw-resize' }} />
+                            <circle cx={shape.x + shape.width} cy={shape.y} r={7} fill="#4f46e5" stroke="#ffffff" strokeWidth={2} />
+                          </g>
+
+                          {/* Esquina Inferior-Izquierda (SW) */}
+                          <g onPointerDown={(e) => handleResizeHandlePointerDown(e, shape.id, 'sw')}>
+                            <circle cx={shape.x} cy={shape.y + shape.height} r={22} fill="transparent" style={{ cursor: 'nesw-resize' }} />
+                            <circle cx={shape.x} cy={shape.y + shape.height} r={7} fill="#4f46e5" stroke="#ffffff" strokeWidth={2} />
+                          </g>
+
+                          {/* Esquina Inferior-Derecha (SE) */}
+                          <g onPointerDown={(e) => handleResizeHandlePointerDown(e, shape.id, 'se')}>
+                            <circle cx={shape.x + shape.width} cy={shape.y + shape.height} r={22} fill="transparent" style={{ cursor: 'nwse-resize' }} />
+                            <circle cx={shape.x + shape.width} cy={shape.y + shape.height} r={7} fill="#4f46e5" stroke="#ffffff" strokeWidth={2} />
+                          </g>
+                        </>
                       ) : (
-                        <circle cx={shape.x + shape.width} cy={shape.y + shape.height} r={4.5} fill="#4f46e5" stroke="#ffffff" strokeWidth={1.5} />
+                        /* Si está bloqueada: solo puntos decorativos sin interactividad */
+                        <>
+                          <circle cx={shape.x} cy={shape.y} r={4.5} fill="#94a3b8" stroke="#ffffff" strokeWidth={1.5} />
+                          <circle cx={shape.x + shape.width} cy={shape.y} r={4.5} fill="#94a3b8" stroke="#ffffff" strokeWidth={1.5} />
+                          <circle cx={shape.x} cy={shape.y + shape.height} r={4.5} fill="#94a3b8" stroke="#ffffff" strokeWidth={1.5} />
+                          <circle cx={shape.x + shape.width} cy={shape.y + shape.height} r={4.5} fill="#94a3b8" stroke="#ffffff" strokeWidth={1.5} />
+                        </>
                       )}
                     </>
                   )}
@@ -1208,6 +1610,8 @@ export default function MobileFloorPlanEditor({
                   onPointerDown={(e) => handlePointerDown(e, door.id)}
                   style={{ cursor: panMode ? 'grab' : 'move' }}
                 >
+                  {/* Hit area amplia transparente para tocar fácilmente en móvil */}
+                  <rect x={-15} y={-15} width={r + 30} height={r + 30} fill="transparent" />
                   <line 
                     x1="0" 
                     y1="0" 
@@ -1218,12 +1622,12 @@ export default function MobileFloorPlanEditor({
                   />
                   <path 
                     d={`M 0 0 L ${r} 0 A ${r} ${r} 0 0 1 0 ${r} Z`} 
-                    fill="rgba(79, 70, 229, 0.08)" 
+                    fill={isSelected ? 'rgba(79, 70, 229, 0.16)' : 'rgba(79, 70, 229, 0.08)'} 
                     stroke={isSelected ? '#4f46e5' : '#94a3b8'} 
                     strokeWidth={1.5}
                     strokeDasharray="4,2"
                   />
-                  <circle cx="0" cy="0" r={4} fill={isSelected ? '#4f46e5' : '#0f172a'} />
+                  <circle cx="0" cy="0" r={4.5} fill={isSelected ? '#4f46e5' : '#0f172a'} stroke="#ffffff" strokeWidth={1} />
                 </g>
               );
             })}
@@ -1238,10 +1642,12 @@ export default function MobileFloorPlanEditor({
               return (
                 <g 
                   key={win.id}
-                  transform={`translate(${win.x}, ${win.y}) rotate(${rot})`}
+                  transform={`translate(${win.x}, ${win.y}) rotate(${rot}, ${w / 2}, ${h / 2})`}
                   onPointerDown={(e) => handlePointerDown(e, win.id)}
                   style={{ cursor: panMode ? 'grab' : 'move' }}
                 >
+                  {/* Hit area amplia transparente */}
+                  <rect x={-10} y={-10} width={w + 20} height={h + 20} fill="transparent" />
                   <rect 
                     x="0" 
                     y="0" 
@@ -1270,10 +1676,12 @@ export default function MobileFloorPlanEditor({
               return (
                 <g 
                   key={st.id}
-                  transform={`translate(${st.x}, ${st.y}) rotate(${rot})`}
+                  transform={`translate(${st.x}, ${st.y}) rotate(${rot}, ${w / 2}, ${h / 2})`}
                   onPointerDown={(e) => handlePointerDown(e, st.id)}
                   style={{ cursor: panMode ? 'grab' : 'move' }}
                 >
+                  {/* Hit area amplia transparente */}
+                  <rect x={-10} y={-10} width={w + 20} height={h + 20} fill="transparent" />
                   <rect 
                     x="0" 
                     y="0" 
@@ -1393,6 +1801,34 @@ export default function MobileFloorPlanEditor({
             </span>
           </button>
 
+          {/* Botón Ver/Ocultar Piso Inferior Transparente (Papel Cebolla) */}
+          {currentFloorIndex > 0 && (
+            <button 
+              type="button" 
+              className="mfp-nav-circle-btn"
+              style={{
+                ...editorStyles.navCircleBtn,
+                backgroundColor: showLowerFloor ? '#e0e7ff' : '#ffffff',
+                borderColor: showLowerFloor ? '#6366f1' : '#e2e8f0',
+                color: showLowerFloor ? '#4f46e5' : '#64748b',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '1px',
+                boxShadow: showLowerFloor ? '0 2px 8px rgba(79, 70, 229, 0.25)' : 'none',
+              }}
+              onClick={() => setShowLowerFloor(prev => !prev)}
+              title={showLowerFloor ? `Ocultar guía de ${lowerFloor?.name || 'piso de abajo'}` : `Ver guía de ${lowerFloor?.name || 'piso de abajo'}`}
+              aria-label="Alternar piso inferior transparente"
+            >
+              <Layers size={17} strokeWidth={showLowerFloor ? 2.5 : 2} />
+              <span style={{ fontSize: '7px', fontWeight: '800', lineHeight: 1, textTransform: 'uppercase' }}>
+                {showLowerFloor ? 'GUÍA ON' : 'GUÍA OFF'}
+              </span>
+            </button>
+          )}
+
           <button 
             type="button" 
             className="mfp-nav-circle-btn"
@@ -1453,6 +1889,33 @@ export default function MobileFloorPlanEditor({
             >
               <Pencil size={13} strokeWidth={2.4} />
               <span>Editar</span>
+            </button>
+          )}
+
+          {/* Botón Girar 90°: rota orientación directamente sin abrir modal */}
+          {!selectedShape.locked && (
+            <button
+              type="button"
+              className={!isRoomOrPoly ? "mfp-pill-edit-btn" : "mfp-pill-icon-btn"}
+              style={!isRoomOrPoly ? {
+                ...editorStyles.pillEditBtn,
+                backgroundColor: '#4f46e5',
+                color: '#ffffff',
+              } : {
+                ...editorStyles.pillIconBtn,
+                backgroundColor: '#eef2ff',
+                borderColor: '#c7d2fe',
+                color: '#4f46e5',
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRotateSelected();
+              }}
+              title="Girar orientación (90°)"
+              aria-label="Girar 90 grados"
+            >
+              <RotateCw size={!isRoomOrPoly ? 14 : 16} strokeWidth={2.4} />
+              {!isRoomOrPoly && <span>Girar 90°</span>}
             </button>
           )}
 
@@ -1748,7 +2211,7 @@ export default function MobileFloorPlanEditor({
             </div>
 
             <div className="mfp-add-grid" style={editorStyles.addOptionsGrid}>
-              {/* Opción 1: Habitación Rectangular (Trazar con dedos) */}
+              {/* Opción 1: Habitación Rectangular */}
               <button
                 type="button"
                 className="mfp-add-option-card"
@@ -1759,24 +2222,8 @@ export default function MobileFloorPlanEditor({
                   <Square size={20} />
                 </div>
                 <div style={editorStyles.addOptionTextBox}>
-                  <h4 className="mfp-add-opt-title" style={editorStyles.addOptionTitle}>Habitación (Rectángulo)</h4>
-                  <p className="mfp-add-opt-desc" style={editorStyles.addOptionDesc}>Tocá y arrastrá en la grilla para definir tamaño</p>
-                </div>
-              </button>
-
-              {/* Opción 2: Trazar con dedos (Polígono / Formas libres) */}
-              <button
-                type="button"
-                className="mfp-add-option-card"
-                style={editorStyles.addOptionCard}
-                onClick={handleStartDrawPolygon}
-              >
-                <div className="mfp-add-icon-box" style={{ ...editorStyles.addOptionIconBox, backgroundColor: 'rgba(56, 189, 248, 0.12)', color: '#0284c7' }}>
-                  <PenTool size={20} />
-                </div>
-                <div style={editorStyles.addOptionTextBox}>
-                  <h4 className="mfp-add-opt-title" style={editorStyles.addOptionTitle}>Trazar con dedos</h4>
-                  <p className="mfp-add-opt-desc" style={editorStyles.addOptionDesc}>Marcá esquinas libres (L, triángulos, ochavas)</p>
+                  <h4 className="mfp-add-opt-title" style={editorStyles.addOptionTitle}>Habitación (Cuadrado / Rectángulo)</h4>
+                  <p className="mfp-add-opt-desc" style={editorStyles.addOptionDesc}>Tocá o arrastrá en la grilla para definir ambiente</p>
                 </div>
               </button>
 
@@ -1927,15 +2374,17 @@ const editorStyles = {
     userSelect: 'none',
     WebkitUserSelect: 'none',
     fontFamily: 'Plus Jakarta Sans, -apple-system, BlinkMacSystemFont, sans-serif',
+    paddingBottom: 'env(safe-area-inset-bottom, 0px)',
   },
   topBar: {
-    height: '56px',
+    height: 'auto',
+    minHeight: '56px',
     backgroundColor: '#ffffff',
     borderBottom: '1px solid #e2e8f0',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: '0 12px',
+    padding: 'calc(env(safe-area-inset-top, 0px) + 8px) 12px 8px 12px',
     zIndex: 20,
     gap: '8px',
     boxShadow: '0 1px 3px rgba(0, 0, 0, 0.04)',
@@ -2346,7 +2795,7 @@ const editorStyles = {
   },
   bottomFloatingDock: {
     position: 'absolute',
-    bottom: '22px',
+    bottom: '12px',
     left: '50%',
     transform: 'translateX(-50%)',
     zIndex: 30,

@@ -446,6 +446,8 @@ const styles = {
     backgroundColor: '#ffffff',
     overflow: 'hidden',
     position: 'relative',
+    paddingTop: 'env(safe-area-inset-top, 0px)',
+    paddingBottom: 'env(safe-area-inset-bottom, 0px)',
   },
   scrollContent: {
     flex: 1,

@@ -5,14 +5,12 @@ import {
   MapPin, 
   Globe, 
   Pencil, 
-  CreditCard, 
   CheckCircle2, 
   Users, 
   UserPlus, 
   Mail, 
   Trash2, 
   RotateCw, 
-  Crown, 
   X, 
   Check, 
   ExternalLink,
@@ -23,17 +21,20 @@ import {
 } from 'lucide-react';
 import logoDefault from '../assets/logo-color.png';
 import { getCountries, getStates, getCities } from '../data/locationData';
+import BottomSheet from './BottomSheet';
 
 export default function OwnerDashboard({
   agency,
   onUpdateAgency,
   plan,
   onUpdatePlan,
-  agents,
+  agents = [],
   onAddAgent,
   onRemoveAgent,
   onResendInvite,
 }) {
+  const safeAgents = Array.isArray(agents) ? agents : [];
+
   // Modales
   const [isEditAgencyOpen, setIsEditAgencyOpen] = useState(false);
   const [isInviteAgentOpen, setIsInviteAgentOpen] = useState(false);
@@ -61,37 +62,7 @@ export default function OwnerDashboard({
   // Toast global
   const showToast = (msg) => toast.success(msg);
 
-  // Bloquear el scroll de fondo cuando un modal esté abierto
-  useEffect(() => {
-    if (!isEditAgencyOpen && !isInviteAgentOpen) return;
 
-    document.documentElement.classList.add('app-modal-open');
-    document.body.classList.add('app-modal-open');
-
-    const scrollContainers = document.querySelectorAll('main, .app-detail-main, .app-main-content, .app-container');
-    const prevStyles = [];
-    scrollContainers.forEach(el => {
-      prevStyles.push({
-        el,
-        overflow: el.style.overflow,
-        overflowY: el.style.overflowY,
-        touchAction: el.style.touchAction
-      });
-      el.style.overflow = 'hidden';
-      el.style.overflowY = 'hidden';
-      el.style.touchAction = 'none';
-    });
-
-    return () => {
-      document.documentElement.classList.remove('app-modal-open');
-      document.body.classList.remove('app-modal-open');
-      prevStyles.forEach(({ el, overflow, overflowY, touchAction }) => {
-        el.style.overflow = overflow;
-        el.style.overflowY = overflowY;
-        el.style.touchAction = touchAction;
-      });
-    };
-  }, [isEditAgencyOpen, isInviteAgentOpen]);
 
   const handleOpenEdit = () => {
     const curCountry = agency?.country || 'Uruguay';
@@ -221,13 +192,6 @@ export default function OwnerDashboard({
 
   return (
     <main key="dashboard-view" className="app-main-content" style={styles.container}>
-      {/* Toast */}
-      {toastMessage && (
-        <div style={styles.toast}>
-          <Check size={14} color="#ffffff" strokeWidth={3} />
-          <span>{toastMessage}</span>
-        </div>
-      )}
 
 
       {/* =========================================================================
@@ -308,12 +272,12 @@ export default function OwnerDashboard({
             </div>
             <div style={styles.planStatDivider} />
             <div style={styles.planStat}>
-              <span style={styles.planStatVal}>{agents.length} / {plan?.agentsLimit ?? 10}</span>
+              <span style={styles.planStatVal}>{safeAgents.length} / {plan?.agentsLimit ?? 10}</span>
               <span style={styles.planStatKey}>Agentes</span>
             </div>
             <div style={styles.planStatDivider} />
             <div style={styles.planStat}>
-              <span style={styles.planStatVal}>15/10/26</span>
+              <span style={styles.planStatVal}>{plan?.renewalDate || '15/10/26'}</span>
               <span style={styles.planStatKey}>Renovación</span>
             </div>
           </div>
@@ -326,7 +290,7 @@ export default function OwnerDashboard({
       <div style={styles.sectionBlock}>
         <div style={styles.sectionHeaderRow}>
           <h3 style={styles.sectionHeading}>
-            Agentes <span>({agents.length})</span>
+            Agentes <span>({safeAgents.length})</span>
           </h3>
           <button 
             type="button" 
@@ -339,7 +303,7 @@ export default function OwnerDashboard({
         </div>
 
         <div style={styles.teamListContainer}>
-          {agents.map((agent, index) => {
+          {safeAgents.map((agent, index) => {
             const isOwner = agent.role === 'owner';
             const isPending = agent.status === 'invited';
 
@@ -417,31 +381,12 @@ export default function OwnerDashboard({
           MODAL: EDITAR PERFIL DE LA INMOBILIARIA
           ========================================================================= */}
       {isEditAgencyOpen && (
-        <div 
-          className="app-modal-backdrop" 
-          style={styles.modalBackdrop} 
-          onClick={() => !isSavingAgency && setIsEditAgencyOpen(false)}
+        <BottomSheet
+          isOpen={isEditAgencyOpen}
+          onClose={() => !isSavingAgency && setIsEditAgencyOpen(false)}
+          title="Editar Inmobiliaria"
+          size="full"
         >
-          <div 
-            className="app-modal-sheet" 
-            style={styles.modalSheet} 
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={styles.modalHandle} />
-            <div style={styles.modalTopRow}>
-              <h4 style={styles.modalTitle}>Editar Inmobiliaria</h4>
-              <button 
-                type="button" 
-                style={styles.modalCloseBtn}
-                onClick={() => !isSavingAgency && setIsEditAgencyOpen(false)}
-                disabled={isSavingAgency}
-                aria-label="Cerrar modal"
-              >
-                <X size={16} color="#64748b" />
-              </button>
-            </div>
-
-            <div className="app-modal-content-body no-scrollbar" style={styles.modalContentScroll}>
               <form onSubmit={handleSaveAgency} style={styles.formStack}>
                 
                 {/* 1. Nombre de la Inmobiliaria */}
@@ -620,29 +565,19 @@ export default function OwnerDashboard({
                   )}
                 </button>
               </form>
-            </div>
-          </div>
-        </div>
+        </BottomSheet>
       )}
 
       {/* =========================================================================
           MODAL: INVITAR AGENTE
           ========================================================================= */}
       {isInviteAgentOpen && (
-        <div className="app-modal-backdrop" style={styles.modalBackdrop} onClick={() => setIsInviteAgentOpen(false)}>
-          <div className="app-modal-sheet" style={styles.modalSheet} onClick={(e) => e.stopPropagation()}>
-            <div style={styles.modalHandle} />
-            <div style={styles.modalTopRow}>
-              <h4 style={styles.modalTitle}>Invitar nuevo agente</h4>
-              <button 
-                type="button" 
-                style={styles.modalCloseBtn}
-                onClick={() => setIsInviteAgentOpen(false)}
-              >
-                <X size={16} color="#64748b" />
-              </button>
-            </div>
-
+        <BottomSheet
+          isOpen={isInviteAgentOpen}
+          onClose={() => setIsInviteAgentOpen(false)}
+          title="Invitar nuevo agente"
+          size="auto"
+        >
             <form onSubmit={handleSendInvite} style={styles.formStack}>
               <div style={styles.inputStack}>
                 <label style={styles.label}>Nombre y Apellido</label>
@@ -652,7 +587,6 @@ export default function OwnerDashboard({
                   onChange={(e) => setInviteName(e.target.value)}
                   placeholder="Ej: Sofía Martínez"
                   style={styles.inputField}
-                  autoFocus
                   required
                 />
               </div>
@@ -686,8 +620,7 @@ export default function OwnerDashboard({
                 <span>Enviar invitación</span>
               </button>
             </form>
-          </div>
-        </div>
+        </BottomSheet>
       )}
 
     </main>

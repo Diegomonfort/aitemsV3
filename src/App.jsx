@@ -70,8 +70,11 @@ import { useAudioRecorder } from './hooks/useAudioRecorder';
 import { photoUploadService } from './services/photoUploadService';
 import { filterAndPreparePhotos, formatFileSize } from './utils/imageOptimizer';
 import PhotoUploadProgress from './components/PhotoUploadProgress';
+import BottomSheet from './components/BottomSheet';
 import { api } from './services/api';
 import { photoService } from './services/photoService';
+import { isNativePlatform, takeMultiplePhotos, pickFromGallery } from './utils/nativeCamera';
+import CameraCapture from './components/CameraCapture';
 import { useToast } from './context/ToastContext';
 
 const getPropertyInventory = (prop) => {
@@ -206,53 +209,32 @@ const PropertyCardItem = React.memo(({ item, onOpen, placeholder, styles }) => {
       </div>
 
       <div style={styles.propertyListInfo}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-          <h4 style={styles.propertyListTitle}>{title}</h4>
+        <h4 style={styles.propertyListTitle}>{title}</h4>
+        <p style={{
+          ...styles.propertyListAddress,
+          color: address ? '#64748b' : '#94a3b8',
+        }}>
+          {address || 'Sin dirección asignada'}
+        </p>
+        <div style={styles.propertyListMetaRow}>
+          <span style={{
+            ...styles.propRoomsTag,
+            ...(roomCount === 0 ? { color: '#94a3b8' } : {})
+          }}>
+            {roomCount > 0 ? `${roomCount} amb.` : '0 amb.'}
+          </span>
+          {isShared && (
+            <span style={styles.propSharedBadge} title="Propiedad compartida contigo">
+              <Users size={11} color="#4338ca" strokeWidth={2.4} />
+            </span>
+          )}
+          {isSharedByMe && (
+            <span style={styles.propSharedByMeBadge} title={`Compartida con ${sharedCount} ${sharedCount === 1 ? 'colega' : 'colegas'}`}>
+              <Users size={11} color="#15803d" strokeWidth={2.4} />
+              <span>({sharedCount})</span>
+            </span>
+          )}
         </div>
-        {isShared && (
-          <span style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '2px 8px',
-            borderRadius: '8px',
-            background: 'linear-gradient(135deg, #eef2ff 0%, #e8e0ff 100%)',
-            color: '#4338ca',
-            fontSize: '10.5px',
-            fontWeight: '700',
-            border: '1px solid #c7d2fe',
-            width: 'fit-content',
-            marginTop: '1px',
-          }}>
-            <Users size={10} color="#6366f1" strokeWidth={2.5} />
-            Compartida
-          </span>
-        )}
-        {isSharedByMe && (
-          <span style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '2px 8px',
-            borderRadius: '8px',
-            backgroundColor: '#f0fdf4',
-            color: '#15803d',
-            fontSize: '10.5px',
-            fontWeight: '600',
-            border: '1px solid #bbf7d0',
-            width: 'fit-content',
-            marginTop: '1px',
-          }}>
-            <Users size={10} color="#16a34a" strokeWidth={2.2} />
-            Compartida ({sharedCount})
-          </span>
-        )}
-        {address && <p style={styles.propertyListAddress}>{address}</p>}
-        {roomCount > 0 && (
-          <span style={styles.propRoomsTag}>
-            {roomCount} {roomCount === 1 ? 'ambiente' : 'ambientes'}
-          </span>
-        )}
       </div>
       <button 
         style={styles.adminMiniBtn}
@@ -374,6 +356,7 @@ export default function App() {
   const [selectedRoomDetail, setSelectedRoomDetail] = useState(initialNav.selectedRoomDetail); // ambiente seleccionado para ver sus ítems
   const [selectedPropertyDetail, setSelectedPropertyDetail] = useState(initialNav.selectedPropertyDetail);
   const [activeCardIndex, setActiveCardIndex] = useState(0);
+  const [previewFloorId, setPreviewFloorId] = useState(null);
 
   // Hook central de Autenticación y Sesión
   const { 
@@ -555,6 +538,18 @@ export default function App() {
     loadProperties();
     loadColleagues();
   }, [loadProperties, loadColleagues]);
+
+  // Registrar handler para pull-to-refresh nativo de iOS
+  useEffect(() => {
+    window.onNativePullToRefresh = () => {
+      loadProperties();
+      loadColleagues();
+    };
+    return () => {
+      delete window.onNativePullToRefresh;
+    };
+  }, [loadProperties, loadColleagues]);
+
 
   const handleLogin = (userData) => {
     setCurrentUser(userData);
@@ -779,15 +774,8 @@ export default function App() {
     else toast.success(msg);
   };
 
-  useEffect(() => {
-    if (!isDeletePropertyModalOpen) return;
-    document.documentElement.classList.add('app-modal-open');
-    document.body.classList.add('app-modal-open');
-    return () => {
-      document.documentElement.classList.remove('app-modal-open');
-      document.body.classList.remove('app-modal-open');
-    };
-  }, [isDeletePropertyModalOpen]);
+
+
 
   // Restaurar detalle fresco de la propiedad al recargar con F5
   useEffect(() => {
@@ -927,6 +915,8 @@ export default function App() {
   // Estados para Detección de Ítems por Fotos con IA en ambiente
   const [photoItemPhase, setPhotoItemPhase] = useState('upload'); // 'upload' | 'analyzing' | 'review'
   const [photoItemFiles, setPhotoItemFiles] = useState([]);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [cameraContext, setCameraContext] = useState('items'); // 'items' | 'property' | 'room'
   const [photoDetectedItems, setPhotoDetectedItems] = useState([]);
   const [selectedPhotoReviewId, setSelectedPhotoReviewId] = useState('all');
   const [photoSourceFilter, setPhotoSourceFilter] = useState('all'); // 'all' | 'room' | 'unassigned' | 'other'
@@ -953,6 +943,10 @@ export default function App() {
   const [detectedVoiceRooms, setDetectedVoiceRooms] = useState([]);
   const [editingDetectedRoomId, setEditingDetectedRoomId] = useState(null);
   const [editingDetectedRoomName, setEditingDetectedRoomName] = useState('');
+  const [isConfirmingVoiceRooms, setIsConfirmingVoiceRooms] = useState(false);
+  const [isConfirmingRoomVoiceItems, setIsConfirmingRoomVoiceItems] = useState(false);
+  const [isConfirmingVoiceItems, setIsConfirmingVoiceItems] = useState(false);
+  const [isConfirmingPhotoItems, setIsConfirmingPhotoItems] = useState(false);
 
   // Grabadores de audio reales (MediaRecorder)
   const roomAudioRecorder = useAudioRecorder();
@@ -980,6 +974,19 @@ export default function App() {
   const [newCustomMoveRoom, setNewCustomMoveRoom] = useState('');
   const [isDeletingPhotosModal, setIsDeletingPhotosModal] = useState(false);
 
+  // Deshabilitar pull-to-refresh nativo cuando hay un overlay abierto
+  useEffect(() => {
+    const anyOverlayOpen = isMenuOpen || isCameraOpen || isModalOpen || isEditPropertyModalOpen 
+      || isDeletePropertyModalOpen || isExportPdfModalOpen || isShareModalOpen 
+      || selectedPhotoModal || isAddingPhotosModal || isFloorPlanEditorOpen;
+    // Comunicar directamente al nativo de iOS
+    try {
+      window.webkit?.messageHandlers?.pullToRefresh?.postMessage({ enabled: !anyOverlayOpen });
+    } catch (e) { /* no estamos en iOS */ }
+  }, [isMenuOpen, isCameraOpen, isModalOpen, isEditPropertyModalOpen, 
+      isDeletePropertyModalOpen, isExportPdfModalOpen, isShareModalOpen, 
+      selectedPhotoModal, isAddingPhotosModal, isFloorPlanEditorOpen]);
+
   useEffect(() => {
     if (!selectedPhotoModal) return;
     const handleKeyDown = (e) => {
@@ -1006,41 +1013,69 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedPhotoModal, selectedPropertyDetail, selectedPhotoRoomDetail]);
 
+  // Límite de audio para ítems (modo rápido): 60 segundos
   useEffect(() => {
-    let timer;
-    if (isRecording) {
-      timer = setInterval(() => {
-        setRecordingTime((prev) => prev + 1);
-      }, 1000);
-    } else {
+    if (!isRecording) {
       setRecordingTime(0);
+      return;
     }
-    return () => clearInterval(timer);
-  }, [isRecording]);
 
-  useEffect(() => {
-    let timer;
-    if (voiceRoomPhase === 'recording') {
-      timer = setInterval(() => {
-        setVoiceRoomTime((prev) => prev + 1);
-      }, 1000);
-    } else if (voiceRoomPhase === 'idle') {
-      setVoiceRoomTime(0);
+    if (recordingTime >= 60) {
+      toast.info('Tiempo límite alcanzado (60s). Procesando ítems...');
+      handleStopVoiceRecording();
+      return;
     }
-    return () => clearInterval(timer);
-  }, [voiceRoomPhase]);
 
+    const timer = setTimeout(() => {
+      setRecordingTime((prev) => prev + 1);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [isRecording, recordingTime]);
+
+  // Límite de audio para ambientes: 45 segundos
   useEffect(() => {
-    let timer;
-    if (voiceItemPhase === 'recording') {
-      timer = setInterval(() => {
-        setVoiceItemTime((prev) => prev + 1);
-      }, 1000);
-    } else if (voiceItemPhase === 'idle') {
-      setVoiceItemTime(0);
+    if (voiceRoomPhase !== 'recording') {
+      if (voiceRoomPhase === 'idle') {
+        setVoiceRoomTime(0);
+      }
+      return;
     }
-    return () => clearInterval(timer);
-  }, [voiceItemPhase]);
+
+    if (voiceRoomTime >= 45) {
+      toast.info('Tiempo límite alcanzado (45s). Procesando ambientes...');
+      handleStopVoiceRoomRecording();
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setVoiceRoomTime((prev) => prev + 1);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [voiceRoomPhase, voiceRoomTime]);
+
+  // Límite de audio para ítems (detalle de propiedad): 60 segundos
+  useEffect(() => {
+    if (voiceItemPhase !== 'recording') {
+      if (voiceItemPhase === 'idle') {
+        setVoiceItemTime(0);
+      }
+      return;
+    }
+
+    if (voiceItemTime >= 60) {
+      toast.info('Tiempo límite alcanzado (60s). Procesando ítems...');
+      handleStopItemVoiceRecording();
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setVoiceItemTime((prev) => prev + 1);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [voiceItemPhase, voiceItemTime]);
 
   // Reset de scroll al cambiar de pantalla, ambiente, fotos o pestaña
   useEffect(() => {
@@ -1085,25 +1120,34 @@ export default function App() {
     setIsRecording(false);
     setVoicePhase('processing');
     try {
+      console.log('🎤 [handleStopVoiceRecording] Deteniendo grabación...');
       const { audioBlob, mimeType } = await itemAudioRecorder.stopRecording();
+      console.log('🎤 [handleStopVoiceRecording] Audio obtenido:', { size: audioBlob?.size, mimeType });
       if (!audioBlob || audioBlob.size === 0) {
-        throw new Error('No se detectó audio grabado.');
+        throw new Error('No se detectó audio grabado. Probá hablar más cerca del micrófono.');
       }
 
       const activeProp = selectedProperty || selectedPropertyDetail;
+      const propId = activeProp?.id;
+      if (!propId) {
+        throw new Error('No se encontró el ID de la propiedad.');
+      }
+
       const matchedAmb = (activeProp?.ambientes || []).find(
         a => a.name?.toLowerCase().trim() === selectedRoom?.toLowerCase().trim()
       );
-      const categoryId = matchedAmb?.id || selectedRoom;
+      const categoryId = matchedAmb?.id || selectedRoom || 'general';
 
       const fileExt = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('aac') ? 'aac' : 'webm';
       const formData = new FormData();
       formData.append('audio', audioBlob, `item_${Date.now()}.${fileExt}`);
       formData.append('user_id', authUser?.id || activeProp?.userId || 'anonymous');
-      formData.append('property_id', activeProp?.id);
+      formData.append('property_id', propId);
       formData.append('category_id', categoryId);
 
+      console.log('🚀 [handleStopVoiceRecording] Enviando audio a /api/voice/item/process...');
       const res = await voiceService.processVoiceItem(formData);
+      console.log('📥 [handleStopVoiceRecording] Respuesta de voiceService:', res);
       if (!res.success) {
         throw new Error(res.message || res.error || 'Error al procesar los ítems por voz');
       }
@@ -1123,7 +1167,7 @@ export default function App() {
       setExtractedItems(formatted);
       setVoicePhase('review');
     } catch (err) {
-      console.error('Error procesando dictado por voz:', err);
+      console.error('❌ Error procesando dictado por voz:', err);
       toast.error(err.message || 'Ocurrió un error al procesar el audio.');
       setVoicePhase('idle');
     }
@@ -1167,9 +1211,11 @@ export default function App() {
   };
 
   const handleConfirmVoiceItems = async () => {
+    if (isConfirmingVoiceItems) return;
     const confirmedItems = extractedItems.filter(i => i.checked && i.name.trim());
     if (confirmedItems.length === 0) return;
 
+    setIsConfirmingVoiceItems(true);
     const activeProp = selectedProperty || selectedPropertyDetail;
     const room = selectedRoom;
 
@@ -1238,6 +1284,8 @@ export default function App() {
     } catch (err) {
       console.error('Error al confirmar ítems de dictado:', err);
       toast.error('Error guardando los ítems: ' + (err.message || err));
+    } finally {
+      setIsConfirmingVoiceItems(false);
     }
   };
 
@@ -1665,18 +1713,27 @@ export default function App() {
   const handleStopVoiceRoomRecording = async () => {
     setVoiceRoomPhase('processing');
     try {
+      console.log('🎤 [handleStopVoiceRoomRecording] Deteniendo grabación...');
       const { audioBlob, mimeType } = await roomAudioRecorder.stopRecording();
+      console.log('🎤 [handleStopVoiceRoomRecording] Audio obtenido:', { size: audioBlob?.size, mimeType });
       if (!audioBlob || audioBlob.size === 0) {
-        throw new Error('No se detectó audio grabado.');
+        throw new Error('No se detectó audio grabado. Probá hablar más cerca del micrófono.');
+      }
+
+      const propId = selectedPropertyDetail?.id || selectedProperty?.id;
+      if (!propId) {
+        throw new Error('No se encontró el ID de la propiedad.');
       }
 
       const fileExt = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('aac') ? 'aac' : 'webm';
       const formData = new FormData();
       formData.append('audio', audioBlob, `ambient_${Date.now()}.${fileExt}`);
       formData.append('user_id', authUser?.id || selectedPropertyDetail?.userId || 'anonymous');
-      formData.append('property_id', selectedPropertyDetail?.id);
+      formData.append('property_id', propId);
 
+      console.log('🚀 [handleStopVoiceRoomRecording] Enviando audio a /api/voice/ambient/process...');
       const res = await voiceService.processVoiceAmbient(formData);
+      console.log('📥 [handleStopVoiceRoomRecording] Respuesta del backend:', res);
       if (!res.success) {
         throw new Error(res.message || res.error || 'Error al procesar los ambientes por voz');
       }
@@ -1695,7 +1752,7 @@ export default function App() {
       setVoiceRoomDuration(res.data?.duration || res.duration || res.data?.data?.duration || roomAudioRecorder.recordingTime || 0);
       setVoiceRoomPhase('review');
     } catch (err) {
-      console.error('Error procesando audio de ambientes:', err);
+      console.error('❌ Error procesando audio de ambientes:', err);
       toast.error(err.message || 'Ocurrió un error al procesar el audio.');
       setVoiceRoomPhase('idle');
     }
@@ -1723,6 +1780,7 @@ export default function App() {
   };
 
   const handleConfirmDetectedRooms = async () => {
+    if (isConfirmingVoiceRooms) return;
     if (!selectedPropertyDetail) return;
     const confirmed = detectedVoiceRooms.filter(r => r.checked && r.name.trim());
     if (confirmed.length === 0) return;
@@ -1739,6 +1797,7 @@ export default function App() {
       return;
     }
 
+    setIsConfirmingVoiceRooms(true);
     try {
       let createdCategories = [];
       const payload = {
@@ -1780,6 +1839,8 @@ export default function App() {
     } catch (err) {
       console.error('Error al confirmar ambientes:', err);
       toast.error('Error guardando los ambientes: ' + (err.message || err));
+    } finally {
+      setIsConfirmingVoiceRooms(false);
     }
   };
 
@@ -1861,25 +1922,35 @@ export default function App() {
   const handleStopItemVoiceRecording = async () => {
     setVoiceItemPhase('processing');
     try {
+      console.log('🎤 [handleStopItemVoiceRecording] Deteniendo grabación de ítem...');
       const { audioBlob, mimeType } = await itemAudioRecorder.stopRecording();
+      console.log('🎤 [handleStopItemVoiceRecording] Audio de ítem obtenido:', { size: audioBlob?.size, mimeType });
       if (!audioBlob || audioBlob.size === 0) {
-        throw new Error('No se detectó audio grabado.');
+        throw new Error('No se detectó audio grabado. Probá hablar más cerca del micrófono.');
+      }
+
+      const activeProp = selectedPropertyDetail || selectedProperty;
+      const propId = activeProp?.id;
+      if (!propId) {
+        throw new Error('No se encontró el ID de la propiedad.');
       }
 
       // Buscar category_id del ambiente actual
-      const matchedAmb = (selectedPropertyDetail?.ambientes || []).find(
+      const matchedAmb = (activeProp?.ambientes || []).find(
         a => a.name?.toLowerCase().trim() === selectedRoomDetail?.toLowerCase().trim()
       );
-      const categoryId = matchedAmb?.id || selectedRoomDetail;
+      const categoryId = matchedAmb?.id || selectedRoomDetail || 'general';
 
       const fileExt = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('aac') ? 'aac' : 'webm';
       const formData = new FormData();
       formData.append('audio', audioBlob, `item_${Date.now()}.${fileExt}`);
-      formData.append('user_id', authUser?.id || selectedPropertyDetail?.userId || 'anonymous');
-      formData.append('property_id', selectedPropertyDetail?.id);
+      formData.append('user_id', authUser?.id || activeProp?.userId || 'anonymous');
+      formData.append('property_id', propId);
       formData.append('category_id', categoryId);
 
+      console.log('🚀 [handleStopItemVoiceRecording] Enviando audio a /api/voice/item/process...');
       const res = await voiceService.processVoiceItem(formData);
+      console.log('📥 [handleStopItemVoiceRecording] Respuesta de voiceService:', res);
       if (!res.success) {
         throw new Error(res.message || res.error || 'Error al procesar los ítems por voz');
       }
@@ -1900,7 +1971,7 @@ export default function App() {
       setVoiceItemDuration(res.data?.duration || res.duration || res.data?.data?.duration || itemAudioRecorder.recordingTime || 0);
       setVoiceItemPhase('review');
     } catch (err) {
-      console.error('Error procesando audio de ítems:', err);
+      console.error('❌ Error procesando audio de ítems:', err);
       toast.error(err.message || 'Ocurrió un error al procesar el audio.');
       setVoiceItemPhase('idle');
     }
@@ -1942,10 +2013,12 @@ export default function App() {
   };
 
   const handleConfirmRoomVoiceItems = async () => {
+    if (isConfirmingRoomVoiceItems) return;
     if (!selectedPropertyDetail || !selectedRoomDetail) return;
     const confirmed = voiceDetectedItems.filter(i => i.checked && i.name.trim());
     if (confirmed.length === 0) return;
 
+    setIsConfirmingRoomVoiceItems(true);
     try {
       const matchedAmb = (selectedPropertyDetail?.ambientes || []).find(
         a => a.name?.toLowerCase().trim() === selectedRoomDetail?.toLowerCase().trim()
@@ -2007,6 +2080,8 @@ export default function App() {
     } catch (err) {
       console.error('Error al confirmar ítems:', err);
       toast.error('Error guardando los ítems: ' + (err.message || err));
+    } finally {
+      setIsConfirmingRoomVoiceItems(false);
     }
   };
 
@@ -2034,6 +2109,84 @@ export default function App() {
       return [...prev, ...newFiles];
     });
     e.target.value = '';
+  };
+
+  // Handler: abrir cámara in-app para captura múltiple
+  const handleOpenCamera = (context = 'items') => {
+    setCameraContext(context);
+    setIsCameraOpen(true);
+  };
+
+  // Handler: fotos capturadas desde CameraCapture
+  const handleCameraPhotosReady = (capturedPhotos) => {
+    if (!capturedPhotos?.length) return;
+
+    if (cameraContext === 'property') {
+      // Flujo: "Subir fotos" a la propiedad
+      const newItems = capturedPhotos.map((photo, idx) => ({
+        id: `pending-cam-${Date.now()}-${idx}`,
+        file: photo.file,
+        name: photo.file.name,
+        title: `Foto ${idx + 1}`,
+        url: photo.url,
+        size: photo.file.size,
+        originalSize: photo.file.size,
+        wasOptimized: false,
+        formattedSize: `${(photo.file.size / 1024).toFixed(0)} KB`,
+        room: newPhotoRoom || 'General',
+      }));
+      setSelectedNewPhotos(prev => [...prev, ...newItems]);
+      toast.success(`${capturedPhotos.length} foto${capturedPhotos.length > 1 ? 's' : ''} agregada${capturedPhotos.length > 1 ? 's' : ''}`);
+    } else if (cameraContext === 'room') {
+      // Flujo: fotos de un ambiente específico
+      const newPhotos = capturedPhotos.map((photo) => ({
+        url: photo.url,
+        file: photo.file,
+      }));
+      setRoomPhotos(prev => [...prev, ...newPhotos]);
+      toast.success(`${capturedPhotos.length} foto${capturedPhotos.length > 1 ? 's' : ''} agregada${capturedPhotos.length > 1 ? 's' : ''}`);
+    } else {
+      // Flujo: detección de ítems por IA
+      const remainingSlots = 20 - photoItemFiles.length;
+      const photosToAdd = capturedPhotos.slice(0, remainingSlots);
+
+      setPhotoItemFiles(prev => {
+        const currentCount = prev.length;
+        const newPhotos = photosToAdd.map((photo, idx) => ({
+          id: `photo-cam-${Date.now()}-${idx}`,
+          title: `Foto ${currentCount + idx + 1}`,
+          url: photo.url,
+          file: photo.file,
+        }));
+        return [...prev, ...newPhotos];
+      });
+      toast.success(`${photosToAdd.length} foto${photosToAdd.length > 1 ? 's' : ''} agregada${photosToAdd.length > 1 ? 's' : ''}`);
+    }
+  };
+
+  // Handler nativo: elegir fotos de la galería (iOS/Android)
+  const handleNativeGalleryPick = async () => {
+    const remainingSlots = 20 - photoItemFiles.length;
+    if (remainingSlots <= 0) {
+      toast.warning('Ya tenés el máximo de fotos');
+      return;
+    }
+
+    const photos = await pickFromGallery(Math.min(remainingSlots, 10));
+    if (!photos.length) return;
+
+    setPhotoItemFiles(prev => {
+      const currentCount = prev.length;
+      const newPhotos = photos.map((photo, idx) => ({
+        id: `photo-gallery-${Date.now()}-${idx}`,
+        title: `Foto ${currentCount + idx + 1}`,
+        url: photo.url,
+        file: photo.file,
+      }));
+      return [...prev, ...newPhotos];
+    });
+
+    toast.success(`${photos.length} foto${photos.length > 1 ? 's' : ''} agregada${photos.length > 1 ? 's' : ''}`);
   };
 
   const handleToggleExistingPhoto = (photo) => {
@@ -2167,6 +2320,7 @@ export default function App() {
   };
 
   const handleConfirmPhotoItems = async () => {
+    if (isConfirmingPhotoItems) return;
     if (!selectedPropertyDetail || !selectedRoomDetail) return;
     const confirmed = photoDetectedItems.filter(i => i.checked && i.name.trim());
     if (confirmed.length === 0) {
@@ -2174,6 +2328,7 @@ export default function App() {
       return;
     }
 
+    setIsConfirmingPhotoItems(true);
     try {
       const matchedAmb = (selectedPropertyDetail.ambientes || []).find(
         a => a.name?.toLowerCase().trim() === selectedRoomDetail.toLowerCase().trim()
@@ -2254,6 +2409,8 @@ export default function App() {
     } catch (err) {
       console.error('Error al confirmar ítems de fotos:', err);
       toast.error('Error guardando los ítems: ' + (err.message || err));
+    } finally {
+      setIsConfirmingPhotoItems(false);
     }
   };
 
@@ -2661,7 +2818,18 @@ export default function App() {
     <div className="app-container" style={styles.appContainer}>
       {/* ============ TOP BAR ============ */}
       <header className="app-top-bar" style={styles.topBar}>
-        <div style={styles.brandContainer}>
+        <div 
+          style={styles.brandContainer}
+          onClick={() => {
+            setSelectedPropertyDetail(null);
+            setSelectedRoomDetail(null);
+            setActiveTab('home');
+            setIsMenuOpen(false);
+          }}
+          role="button"
+          tabIndex={0}
+          aria-label="Ir al inicio"
+        >
           <img src={logo} alt="Aitems" style={styles.logo} />
         </div>
         <div style={styles.headerActions}>
@@ -3546,33 +3714,13 @@ export default function App() {
         const renderAddPhotosModal = () => {
           if (!isAddingPhotosModal) return null;
           return (
-            <div 
-              className="app-modal-backdrop"
-              style={styles.modalBackdrop} 
-              onClick={() => setIsAddingPhotosModal(false)}
+            <BottomSheet
+              isOpen={isAddingPhotosModal}
+              onClose={() => setIsAddingPhotosModal(false)}
+              title="Subir fotos"
+              subtitle={selectedPropertyDetail?.name}
+              size="full"
             >
-              <div 
-                className="app-quick-modal-sheet app-modal-sheet"
-                style={styles.quickActionModalSheet} 
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="app-modal-header" style={styles.modalHeader}>
-                  <div className="app-modal-handle" style={styles.modalHandle} />
-                  <div style={styles.modalTitleRow}>
-                    <div>
-                      <h3 style={styles.modalTitle}>Subir fotos</h3>
-                      <p style={styles.modalSubtitle}>{selectedPropertyDetail?.name}</p>
-                    </div>
-                    <button 
-                      style={styles.modalCloseBtn} 
-                      onClick={() => setIsAddingPhotosModal(false)}
-                    >
-                      <X size={18} color="#64748b" />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="app-modal-content-body" style={styles.modalContentBody}>
                   <div style={styles.uploadPhotosFormWrap}>
                     <div style={styles.formGroup}>
                       <label style={styles.formLabel}>Asignar a ambiente</label>
@@ -3592,28 +3740,65 @@ export default function App() {
                       </div>
                     </div>
 
-                    <label style={{ ...styles.photoUploadDropZone, position: 'relative' }}>
-                      <input 
-                        type="file" 
-                        multiple 
-                        accept="image/*" 
+                    <div style={{ display: 'flex', gap: '10px', marginBottom: '4px' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenCamera('property')}
                         style={{
-                          position: 'absolute',
-                          inset: 0,
-                          width: '100%',
-                          height: '100%',
-                          opacity: 0,
+                          flex: 1,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '20px 12px',
+                          borderRadius: '16px',
+                          border: '2px dashed #c7d2fe',
+                          backgroundColor: '#f0f4ff',
                           cursor: 'pointer',
-                          zIndex: 10,
-                        }} 
-                        onChange={handleNewPhotosSelected}
-                      />
-                      <div style={styles.photoUploadIconCircle}>
-                        <Camera size={26} color="#4f46e5" strokeWidth={2} />
-                      </div>
-                      <span style={styles.photoUploadDropTitle}>Tocar para elegir fotos</span>
-                      <span style={styles.photoUploadDropSub}>Límite 5MB por foto • Optimización automática para fotos &gt; 1MB</span>
-                    </label>
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        <div style={{
+                          width: '48px', height: '48px', borderRadius: '50%',
+                          background: 'linear-gradient(135deg, #0284c7, #0ea5e9)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          <Camera size={22} color="#ffffff" strokeWidth={2.2} />
+                        </div>
+                        <span style={{ fontSize: '13px', fontWeight: '700', color: '#0f172a' }}>Tomar fotos</span>
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>Captura múltiple</span>
+                      </button>
+
+                      <label style={{
+                        flex: 1,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '20px 12px',
+                        borderRadius: '16px',
+                        border: '2px dashed #c7d2fe',
+                        backgroundColor: '#f8f9ff',
+                        cursor: 'pointer',
+                      }}>
+                        <input
+                          type="file"
+                          multiple
+                          accept="image/*"
+                          style={{ display: 'none' }}
+                          onChange={handleNewPhotosSelected}
+                        />
+                        <div style={{
+                          width: '48px', height: '48px', borderRadius: '50%',
+                          background: 'linear-gradient(135deg, #4f46e5, #6366f1)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          <Images size={22} color="#ffffff" strokeWidth={2.2} />
+                        </div>
+                        <span style={{ fontSize: '13px', fontWeight: '700', color: '#0f172a' }}>Galería</span>
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>Elegir del carrete</span>
+                      </label>
+                    </div>
 
                     {isOptimizingPhotos && (
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '12px', background: '#eef2ff', borderRadius: '12px', color: '#4f46e5', fontSize: '13px', fontWeight: '600' }}>
@@ -3705,9 +3890,7 @@ export default function App() {
                       </button>
                     </div>
                   </div>
-                </div>
-              </div>
-            </div>
+            </BottomSheet>
           );
         };
 
@@ -3954,32 +4137,13 @@ export default function App() {
                 );
 
                 return (
-                  <div 
-                    className="app-modal-backdrop"
-                    style={styles.modalBackdrop}
-                    onClick={() => setIsMovingPhotosModal(false)}
+                  <BottomSheet
+                    isOpen={isMovingPhotosModal}
+                    onClose={() => setIsMovingPhotosModal(false)}
+                    title="Mover fotos"
+                    subtitle={`Mover ${selectedBulkPhotoIds.length} ${selectedBulkPhotoIds.length === 1 ? 'foto' : 'fotos'} desde ${originRoom || 'este ambiente'}`}
+                    size="auto"
                   >
-                    <div 
-                      className="app-quick-modal-sheet app-modal-sheet"
-                      style={styles.quickActionModalSheet}
-                      onClick={e => e.stopPropagation()}
-                    >
-                      <div className="app-modal-header" style={styles.modalHeader}>
-                        <div className="app-modal-handle" style={styles.modalHandle} />
-                        <div style={styles.modalTitleRow}>
-                          <div>
-                            <h3 style={styles.modalTitle}>Mover fotos</h3>
-                            <p style={styles.modalSubtitle}>
-                              Mover {selectedBulkPhotoIds.length} {selectedBulkPhotoIds.length === 1 ? 'foto' : 'fotos'} desde {originRoom || 'este ambiente'}
-                            </p>
-                          </div>
-                          <button style={styles.modalCloseBtn} onClick={() => setIsMovingPhotosModal(false)}>
-                            <X size={18} color="#64748b" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="app-modal-content-body" style={styles.modalContentBody}>
                         <label style={styles.formLabel}>Seleccionar ambiente de destino</label>
                         <div className="app-room-select-grid">
                           {otherRooms.map(room => (
@@ -4021,24 +4185,17 @@ export default function App() {
                             Cancelar
                           </button>
                         </div>
-                      </div>
-                    </div>
-                  </div>
+                  </BottomSheet>
                 );
               })()}
 
               {/* Modal: Confirmación para eliminar fotos en masa */}
               {isDeletingPhotosModal && (
-                <div 
-                  className="app-modal-backdrop"
-                  style={styles.modalBackdrop}
-                  onClick={() => setIsDeletingPhotosModal(false)}
+                <BottomSheet
+                  isOpen={isDeletingPhotosModal}
+                  onClose={() => setIsDeletingPhotosModal(false)}
+                  size="auto"
                 >
-                  <div 
-                    className="app-quick-modal-sheet app-modal-sheet"
-                    style={{ ...styles.quickActionModalSheet, maxHeight: '320px' }}
-                    onClick={e => e.stopPropagation()}
-                  >
                     <div style={{ textAlign: 'center', padding: '16px 10px' }}>
                       <div style={{
                         width: '54px',
@@ -4102,8 +4259,7 @@ export default function App() {
                         </button>
                       </div>
                     </div>
-                  </div>
-                </div>
+                </BottomSheet>
               )}
 
               {/* Visor de fotos profesional para este ambiente */}
@@ -4314,35 +4470,13 @@ export default function App() {
 
               {/* ============ MODAL: EDITAR ÍTEM (ESTILO CONSISTENTE CON LOS DEMÁS MODALES) ============ */}
               {detailEditingItemId !== null && (
-                <div 
-                  className="app-modal-backdrop"
-                  style={styles.modalBackdrop} 
-                  onClick={() => setDetailEditingItemId(null)}
+                <BottomSheet
+                  isOpen={detailEditingItemId !== null}
+                  onClose={() => setDetailEditingItemId(null)}
+                  title="Editar ítem"
+                  subtitle="Modificá los datos del elemento relevado"
+                  size="medium"
                 >
-                  <div 
-                    className="app-modal-sheet"
-                    style={styles.modalSheet} 
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="app-modal-header" style={styles.modalHeader}>
-                      <div className="app-modal-handle" style={styles.modalHandle} />
-                      <div style={styles.modalTitleRow}>
-                        <div>
-                          <h3 style={styles.modalTitle}>Editar ítem</h3>
-                          <p style={styles.modalSubtitle}>Modificá los datos del elemento relevado</p>
-                        </div>
-                        <button 
-                          type="button" 
-                          style={styles.modalCloseBtn} 
-                          onClick={() => setDetailEditingItemId(null)}
-                          aria-label="Cerrar modal"
-                        >
-                          <X size={18} color="#64748b" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="app-modal-content-body" style={styles.modalContentBody}>
                       <form 
                         onSubmit={(e) => {
                           e.preventDefault();
@@ -4417,70 +4551,32 @@ export default function App() {
                           <Check size={16} color="#ffffff" strokeWidth={2.4} />
                         </button>
                       </form>
-                    </div>
-                  </div>
-                </div>
+                </BottomSheet>
               )}
 
               {/* ============ MODAL UNIFICADO: NUEVO ÍTEM (VOZ, FOTOS IA, MANUAL) ============ */}
               {isAddItemModalOpen && (
-                <div 
-                  className="app-modal-backdrop"
-                  style={styles.modalBackdrop} 
-                  onClick={() => setIsAddItemModalOpen(false)}
+                <BottomSheet
+                  isOpen={isAddItemModalOpen}
+                  onClose={() => setIsAddItemModalOpen(false)}
+                  title={
+                    itemAddMethod === 'select' ? 'Nuevo ítem' :
+                    itemAddMethod === 'voice' ? 'Dictar ítems por voz' :
+                    itemAddMethod === 'photo' ? 'Analizar fotos con IA' :
+                    'Carga manual de ítem'
+                  }
+                  subtitle={
+                    itemAddMethod === 'select' ? `Elegí cómo relevar elementos en ${selectedRoomDetail}` :
+                    itemAddMethod === 'voice' ? `${selectedRoomDetail} • Reconocimiento y desglose IA` :
+                    itemAddMethod === 'photo' ? `${selectedRoomDetail} • Detección visual inteligente` :
+                    `${selectedRoomDetail} • Carga detallada por teclado`
+                  }
+                  size="full"
+                  showBackButton={itemAddMethod !== 'select'}
+                  onBack={() => setItemAddMethod('select')}
                 >
-                  <div 
-                    className="app-quick-modal-sheet app-modal-sheet app-modal-fixed-height"
-                    style={(itemAddMethod === 'voice' || itemAddMethod === 'photo') ? styles.quickActionModalSheet : styles.modalSheet} 
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {/* Header del Modal */}
-                    <div className="app-modal-header" style={styles.modalHeader}>
-                      <div className="app-modal-handle" style={styles.modalHandle} />
-
-                      {itemAddMethod !== 'select' && (
-                        <div style={{ width: '100%', marginBottom: '10px' }}>
-                          <button 
-                            type="button"
-                            style={styles.stepBackBtn}
-                            onClick={() => setItemAddMethod('select')}
-                          >
-                            <ChevronLeft size={16} color="#4f46e5" strokeWidth={2.4} />
-                            <span>Elegir otro método</span>
-                          </button>
-                        </div>
-                      )}
-
-                      <div style={styles.modalTitleRow}>
-                        <div>
-                          <h3 style={styles.modalTitle}>
-                            {itemAddMethod === 'select' && 'Nuevo ítem'}
-                            {itemAddMethod === 'voice' && 'Dictar ítems por voz'}
-                            {itemAddMethod === 'photo' && 'Analizar fotos con IA'}
-                            {itemAddMethod === 'manual' && 'Carga manual de ítem'}
-                          </h3>
-                          <p style={styles.modalSubtitle}>
-                            {itemAddMethod === 'select' && `Elegí cómo relevar elementos en ${selectedRoomDetail}`}
-                            {itemAddMethod === 'voice' && `${selectedRoomDetail} • Reconocimiento y desglose IA`}
-                            {itemAddMethod === 'photo' && `${selectedRoomDetail} • Detección visual inteligente`}
-                            {itemAddMethod === 'manual' && `${selectedRoomDetail} • Carga detallada por teclado`}
-                          </p>
-                        </div>
-                        <button 
-                          type="button"
-                          style={styles.modalCloseBtn} 
-                          onClick={() => setIsAddItemModalOpen(false)}
-                          aria-label="Cerrar modal"
-                        >
-                          <X size={18} color="#64748b" />
-                        </button>
-                      </div>
-                    </div>
-
                     <div 
-                      className={`app-modal-content-body ${itemAddMethod === 'photo' && photoItemPhase === 'upload' ? 'has-fixed-bottom' : ''}`} 
                       style={{
-                        ...styles.modalContentBody,
                         ...(itemAddMethod === 'photo' && photoItemPhase === 'upload' ? { overflow: 'hidden', paddingBottom: 0 } : {})
                       }}
                     >
@@ -4571,9 +4667,16 @@ export default function App() {
                           {voiceItemPhase === 'recording' && (
                             <div style={styles.recordingActiveBox}>
                               <div style={styles.recordingTimerRow}>
-                                <span style={styles.liveRecordDot} />
-                                <span style={styles.recordingTimerText}>
+                                <span style={{
+                                  ...styles.liveRecordDot,
+                                  backgroundColor: voiceItemTime >= 50 ? '#f59e0b' : '#ef4444'
+                                }} />
+                                <span style={{
+                                  ...styles.recordingTimerText,
+                                  color: voiceItemTime >= 50 ? '#ea580c' : '#0f172a'
+                                }}>
                                   {Math.floor(voiceItemTime / 60).toString().padStart(2, '0')}:{(voiceItemTime % 60).toString().padStart(2, '0')}
+                                  <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: 500, marginLeft: '6px' }}>/ 01:00</span>
                                 </span>
                               </div>
 
@@ -4586,7 +4689,9 @@ export default function App() {
                               </div>
 
                               <p style={styles.transcriptionPreview}>
-                                "Escuchando: relevando ítems para {selectedRoomDetail}..."
+                                {voiceItemTime >= 50
+                                  ? '⚠️ Quedan pocos segundos. Se procesará automáticamente al minuto.'
+                                  : `Escuchando: relevando ítems para ${selectedRoomDetail || 'el ambiente'}...`}
                               </p>
 
                               <button 
@@ -4604,9 +4709,9 @@ export default function App() {
                           {voiceItemPhase === 'processing' && (
                             <div style={styles.aiProcessingBox}>
                               <div style={styles.aiProcessingIconWrap}>
-                                <Sparkles size={28} color="#0f172a" />
+                                <Loader2 size={26} color="#0f172a" style={{ animation: 'spin 1s linear infinite' }} />
                               </div>
-                              <h4 style={styles.aiProcessingTitle}>Procesando ítems con IA...</h4>
+                              <h4 style={styles.aiProcessingTitle}>Procesando ítems...</h4>
                               <p style={styles.aiProcessingSub}>Extrayendo elementos de relevamiento para {selectedRoomDetail}</p>
                             </div>
                           )}
@@ -4706,12 +4811,25 @@ export default function App() {
                               <div style={styles.reviewActionsCol}>
                                 <button 
                                   type="button" 
-                                  style={styles.confirmItemsBtn}
+                                  style={{
+                                    ...styles.confirmItemsBtn,
+                                    opacity: isConfirmingRoomVoiceItems ? 0.75 : 1,
+                                    cursor: isConfirmingRoomVoiceItems ? 'not-allowed' : 'pointer'
+                                  }}
                                   onClick={handleConfirmRoomVoiceItems}
-                                  disabled={voiceDetectedItems.filter(i => i.checked).length === 0}
+                                  disabled={isConfirmingRoomVoiceItems || voiceDetectedItems.filter(i => i.checked).length === 0}
                                 >
-                                  <Check size={16} color="#ffffff" strokeWidth={2.4} />
-                                  <span>Confirmar e incorporar {voiceDetectedItems.filter(i => i.checked).length} ítems</span>
+                                  {isConfirmingRoomVoiceItems ? (
+                                    <>
+                                      <Loader2 size={16} color="#ffffff" style={{ animation: 'spin 1s linear infinite' }} />
+                                      <span>Guardando ítems...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Check size={16} color="#ffffff" strokeWidth={2.4} />
+                                      <span>Confirmar e incorporar {voiceDetectedItems.filter(i => i.checked).length} ítems</span>
+                                    </>
+                                  )}
                                 </button>
 
                                 <button 
@@ -4777,15 +4895,15 @@ export default function App() {
 
                                   {/* 1. Tarjetas de captura rápida (Tomar foto / Elegir de galería) */}
                                   <div style={styles.photoCaptureOptionsGrid}>
-                                    <label htmlFor="camera-direct-upload-input" style={styles.photoCaptureCard}>
+                                    <button type="button" onClick={handleOpenCamera} style={{...styles.photoCaptureCard, border: '1px solid #e2e8f0', cursor: 'pointer', textAlign: 'left'}}>
                                       <div style={styles.photoCaptureIconWrapCamera}>
                                         <Camera size={22} color="#0284c7" strokeWidth={2.2} />
                                       </div>
                                       <div style={styles.photoCaptureCardMeta}>
-                                        <span style={styles.photoCaptureCardTitle}>Tomar foto</span>
-                                        <span style={styles.photoCaptureCardSub}>Abrir cámara</span>
+                                        <span style={styles.photoCaptureCardTitle}>Tomar fotos</span>
+                                        <span style={styles.photoCaptureCardSub}>Captura múltiple</span>
                                       </div>
-                                    </label>
+                                    </button>
 
                                     <label htmlFor="gallery-direct-upload-input" style={styles.photoCaptureCard}>
                                       <div style={styles.photoCaptureIconWrapGallery}>
@@ -4793,9 +4911,9 @@ export default function App() {
                                       </div>
                                       <div style={styles.photoCaptureCardMeta}>
                                         <span style={styles.photoCaptureCardTitle}>Elegir de galería</span>
-                                        <span style={styles.photoCaptureCardSub}>Subir del dispositivo</span>
-                                      </div>
-                                    </label>
+                                        <span style={styles.photoCaptureCardSub}>Selección múltiple</span>
+                                        </div>
+                                      </label>
                                   </div>
 
                                   {/* 2. Sección: Fotos ya subidas en la propiedad */}
@@ -4980,10 +5098,10 @@ export default function App() {
                                 ...styles.aiProcessingIconWrap,
                                 backgroundColor: photoAnalyzeType === 'structure' ? '#ecfdf5' : '#e0f2fe'
                               }}>
-                                <Sparkles size={28} color={photoAnalyzeType === 'structure' ? '#059669' : '#0284c7'} />
+                                <Loader2 size={26} color={photoAnalyzeType === 'structure' ? '#059669' : '#0284c7'} style={{ animation: 'spin 1s linear infinite' }} />
                               </div>
                               <h4 style={styles.aiProcessingTitle}>
-                                {photoAnalyzeType === 'structure' ? 'Analizando estructura con Gemini...' : 'Analizando mobiliario con Gemini...'}
+                                {photoAnalyzeType === 'structure' ? 'Analizando estructura...' : 'Analizando mobiliario...'}
                               </h4>
                               <p style={styles.aiProcessingSub}>
                                 {photoAnalyzeType === 'structure'
@@ -5191,12 +5309,25 @@ export default function App() {
                               <div style={styles.reviewActionsCol}>
                                 <button 
                                   type="button" 
-                                  style={styles.confirmItemsBtn}
+                                  style={{
+                                    ...styles.confirmItemsBtn,
+                                    opacity: isConfirmingPhotoItems ? 0.75 : 1,
+                                    cursor: isConfirmingPhotoItems ? 'not-allowed' : 'pointer'
+                                  }}
                                   onClick={handleConfirmPhotoItems}
-                                  disabled={photoDetectedItems.filter(i => i.checked).length === 0}
+                                  disabled={isConfirmingPhotoItems || photoDetectedItems.filter(i => i.checked).length === 0}
                                 >
-                                  <Check size={16} color="#ffffff" strokeWidth={2.4} />
-                                  <span>Confirmar e incorporar {photoDetectedItems.filter(i => i.checked).length} ítems</span>
+                                  {isConfirmingPhotoItems ? (
+                                    <>
+                                      <Loader2 size={16} color="#ffffff" style={{ animation: 'spin 1s linear infinite' }} />
+                                      <span>Guardando ítems...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Check size={16} color="#ffffff" strokeWidth={2.4} />
+                                      <span>Confirmar e incorporar {photoDetectedItems.filter(i => i.checked).length} ítems</span>
+                                    </>
+                                  )}
                                 </button>
 
                                 <button 
@@ -5216,36 +5347,14 @@ export default function App() {
 
                           {/* Modal Overlay: Selector de tipo de análisis (Mobiliario vs Estructura) */}
                           {isPhotoTypeSelectorOpen && (
-                            <div 
-                              className="app-modal-backdrop" 
-                              style={{ ...styles.modalBackdrop, zIndex: 1200 }}
-                              onClick={() => setIsPhotoTypeSelectorOpen(false)}
+                            <BottomSheet
+                              isOpen={isPhotoTypeSelectorOpen}
+                              onClose={() => setIsPhotoTypeSelectorOpen(false)}
+                              title="¿Qué querés detectar?"
+                              subtitle="Seleccioná qué elementos debe identificar la IA"
+                              size="auto"
+                              stacked
                             >
-                              <div 
-                                className="app-quick-modal-sheet app-modal-sheet" 
-                                style={{ ...styles.quickActionModalSheet, maxWidth: '440px', padding: '22px 20px 20px', zIndex: 1201 }}
-                                onClick={e => e.stopPropagation()}
-                              >
-                                <div className="app-modal-header" style={{ ...styles.modalHeader, marginBottom: '14px' }}>
-                                  <div className="app-modal-handle" style={styles.modalHandle} />
-                                  <div style={styles.modalTitleRow}>
-                                    <div>
-                                      <h3 style={{ ...styles.modalTitle, fontSize: '18px' }}>¿Qué querés detectar?</h3>
-                                      <p style={{ ...styles.modalSubtitle, fontSize: '13px', marginTop: '2px' }}>
-                                        Seleccioná qué elementos debe identificar la IA
-                                      </p>
-                                    </div>
-                                    <button 
-                                      type="button" 
-                                      style={styles.modalCloseBtn}
-                                      onClick={() => setIsPhotoTypeSelectorOpen(false)}
-                                      aria-label="Cerrar"
-                                    >
-                                      <X size={18} color="#64748b" />
-                                    </button>
-                                  </div>
-                                </div>
-
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '4px' }}>
                                   {/* Opción 1: Items / Mobiliario */}
                                   <div 
@@ -5352,8 +5461,7 @@ export default function App() {
                                 >
                                   Cancelar
                                 </button>
-                              </div>
-                            </div>
+                            </BottomSheet>
                           )}
                         </div>
                       )}
@@ -5430,47 +5538,19 @@ export default function App() {
                         </form>
                       )}
                     </div>
-                  </div>
-                </div>
+                </BottomSheet>
               )}
 
               {/* ============ MODAL SUPERIOR: EDITAR ÍTEM DETECTADO (VOZ O FOTO) ============ */}
               {reviewEditModal && (
-                <div 
-                  className="app-modal-backdrop"
-                  style={{
-                    ...styles.modalBackdrop,
-                    zIndex: 250,
-                  }} 
-                  onClick={() => setReviewEditModal(null)}
+                <BottomSheet
+                  isOpen={!!reviewEditModal}
+                  onClose={() => setReviewEditModal(null)}
+                  title="Editar ítem detectado"
+                  subtitle="Modificá nombre, cantidad y notas antes de incorporar"
+                  size="medium"
+                  stacked
                 >
-                  <div 
-                    className="app-modal-sheet"
-                    style={{
-                      ...styles.modalSheet,
-                      boxShadow: '0 -15px 50px rgba(0, 0, 0, 0.25)',
-                    }} 
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="app-modal-header" style={styles.modalHeader}>
-                      <div className="app-modal-handle" style={styles.modalHandle} />
-                      <div style={styles.modalTitleRow}>
-                        <div>
-                          <h3 style={styles.modalTitle}>Editar ítem detectado</h3>
-                          <p style={styles.modalSubtitle}>Modificá nombre, cantidad y notas antes de incorporar</p>
-                        </div>
-                        <button 
-                          type="button"
-                          style={styles.modalCloseBtn} 
-                          onClick={() => setReviewEditModal(null)}
-                          aria-label="Cerrar modal"
-                        >
-                          <X size={18} color="#64748b" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="app-modal-content-body" style={styles.modalContentBody}>
                       <form onSubmit={handleSaveReviewEditModal} style={styles.modalForm}>
                         <div style={styles.formGroup}>
                           <label style={styles.formLabel}>Nombre del ítem *</label>
@@ -5539,9 +5619,7 @@ export default function App() {
                           <Check size={16} color="#ffffff" strokeWidth={2.4} />
                         </button>
                       </form>
-                    </div>
-                  </div>
-                </div>
+                </BottomSheet>
               )}
 
               <div style={{ height: '70px' }} />
@@ -5687,7 +5765,10 @@ export default function App() {
                 <button 
                   type="button" 
                   style={styles.detailShareSquareBtn}
-                  onClick={() => setIsShareModalOpen(true)}
+                  onClick={() => {
+                    loadColleagues();
+                    setIsShareModalOpen(true);
+                  }}
                   aria-label="Compartir ficha con colegas"
                   title="Compartir con colegas"
                 >
@@ -5867,10 +5948,13 @@ export default function App() {
             {detailSubTab === 'plano' && (() => {
               const savedPlan = selectedPropertyDetail?.floorPlan;
               let planShapes = [];
+              let availableFloors = [];
+
               if (Array.isArray(savedPlan?.shapes)) {
                 if (savedPlan.shapes.length > 0 && savedPlan.shapes[0]?.isFloor) {
-                  const floorWithShapes = savedPlan.shapes.find(f => Array.isArray(f.shapes) && f.shapes.length > 0) || savedPlan.shapes[0];
-                  planShapes = floorWithShapes?.shapes || [];
+                  availableFloors = savedPlan.shapes;
+                  const currentFloor = availableFloors.find(f => f.id === previewFloorId) || availableFloors[0];
+                  planShapes = currentFloor?.shapes || [];
                 } else {
                   planShapes = savedPlan.shapes;
                 }
@@ -5886,21 +5970,84 @@ export default function App() {
                     </p>
                   </div>
 
+                  {/* Selector de pisos / plantas si hay más de 1 piso */}
+                  {availableFloors.length > 1 && (
+                    <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', overflowX: 'auto', paddingBottom: '4px' }}>
+                      {availableFloors.map((fl, idx) => {
+                        const isSelected = previewFloorId ? fl.id === previewFloorId : idx === 0;
+                        return (
+                          <button
+                            key={fl.id}
+                            type="button"
+                            style={{
+                              padding: '6px 14px',
+                              borderRadius: '20px',
+                              border: isSelected ? '1.5px solid #4f46e5' : '1px solid #e2e8f0',
+                              backgroundColor: isSelected ? '#eef2ff' : '#ffffff',
+                              color: isSelected ? '#4f46e5' : '#64748b',
+                              fontSize: '12.5px',
+                              fontWeight: isSelected ? '700' : '600',
+                              cursor: 'pointer',
+                              whiteSpace: 'nowrap',
+                              transition: 'all 0.15s ease'
+                            }}
+                            onClick={() => setPreviewFloorId(fl.id)}
+                          >
+                            {fl.name || (idx === 0 ? 'Planta Baja' : `Piso ${idx}`)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {/* Canvas de Plano Arquitectónico interactivo limpio o estado vacío claro */}
                   <div style={styles.detailPlanCanvasContainer}>
                     {hasPlan ? (
                       (() => {
-                        // Calcular Bounding Box automático para centrar y escalar perfectamente
+                        // Calcular Bounding Box automático para centrar y escalar perfectamente considerando rotaciones
                         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
                         planShapes.forEach((s) => {
                           const x = s.x ?? 0;
                           const y = s.y ?? 0;
                           const w = s.width || (s.type === 'door' ? 60 : 80);
-                          const h = s.height || (s.type === 'window' ? 14 : 80);
-                          if (x < minX) minX = x;
-                          if (y < minY) minY = y;
-                          if (x + w > maxX) maxX = x + w;
-                          if (y + h > maxY) maxY = y + h;
+                          const h = s.height || (s.type === 'window' ? 14 : (s.type === 'door' ? 60 : 80));
+                          const rot = s.rotation || 0;
+
+                          if (s.type === 'window' || s.type === 'stairs') {
+                            const isRotated90 = (rot % 180 === 90);
+                            const effW = isRotated90 ? h : w;
+                            const effH = isRotated90 ? w : h;
+                            const cx = x + w / 2;
+                            const cy = y + h / 2;
+                            if (cx - effW / 2 < minX) minX = cx - effW / 2;
+                            if (cy - effH / 2 < minY) minY = cy - effH / 2;
+                            if (cx + effW / 2 > maxX) maxX = cx + effW / 2;
+                            if (cy + effH / 2 > maxY) maxY = cy + effH / 2;
+                          } else if (s.type === 'door') {
+                            const r = s.width || 60;
+                            const rad = (rot * Math.PI) / 180;
+                            const cos = Math.cos(rad);
+                            const sin = Math.sin(rad);
+                            const pts = [
+                              { x: 0, y: 0 },
+                              { x: r, y: 0 },
+                              { x: 0, y: r },
+                              { x: r, y: r }
+                            ];
+                            pts.forEach(p => {
+                              const px = x + (p.x * cos - p.y * sin);
+                              const py = y + (p.x * sin + p.y * cos);
+                              if (px < minX) minX = px;
+                              if (py < minY) minY = py;
+                              if (px > maxX) maxX = px;
+                              if (py > maxY) maxY = py;
+                            });
+                          } else {
+                            if (x < minX) minX = x;
+                            if (y < minY) minY = y;
+                            if (x + w > maxX) maxX = x + w;
+                            if (y + h > maxY) maxY = y + h;
+                          }
                         });
 
                         if (!isFinite(minX)) { minX = 0; minY = 0; maxX = 400; maxY = 300; }
@@ -5999,8 +6146,9 @@ export default function App() {
                                 if (shape.type === 'window') {
                                   const w = shape.width || 80;
                                   const h = shape.height || 14;
+                                  const rot = shape.rotation || 0;
                                   return (
-                                    <g key={shape.id} transform={`translate(${shape.x}, ${shape.y}) rotate(${shape.rotation || 0})`}>
+                                    <g key={shape.id} transform={`translate(${shape.x}, ${shape.y}) rotate(${rot}, ${w / 2}, ${h / 2})`}>
                                       <rect x="0" y="0" width={w} height={h} fill="#ffffff" stroke="#334155" strokeWidth={1.5} rx={2} />
                                       <line x1="3" y1={h / 2} x2={w - 3} y2={h / 2} stroke="#38bdf8" strokeWidth={1.5} />
                                     </g>
@@ -6009,10 +6157,11 @@ export default function App() {
                                 if (shape.type === 'stairs') {
                                   const w = shape.width || 90;
                                   const h = shape.height || 60;
+                                  const rot = shape.rotation || 0;
                                   const steps = 5;
                                   const stepWidth = w / steps;
                                   return (
-                                    <g key={shape.id} transform={`translate(${shape.x}, ${shape.y}) rotate(${shape.rotation || 0})`}>
+                                    <g key={shape.id} transform={`translate(${shape.x}, ${shape.y}) rotate(${rot}, ${w / 2}, ${h / 2})`}>
                                       <rect x="0" y="0" width={w} height={h} fill="#f1f5f9" stroke="#64748b" strokeWidth={1.5} rx={2} />
                                       {Array.from({ length: steps - 1 }).map((_, i) => (
                                         <line key={i} x1={(i + 1) * stepWidth} y1="0" x2={(i + 1) * stepWidth} y2={h} stroke="#94a3b8" strokeWidth={1} />
@@ -6148,58 +6297,23 @@ export default function App() {
 
             {/* ============ MODAL: CREAR AMBIENTE (ELECCIÓN ENTRE VOZ O MANUAL) ============ */}
             {isAddingRoomToDetail && (
-              <div 
-                className="app-modal-backdrop"
-                style={styles.modalBackdrop} 
-                onClick={() => setIsAddingRoomToDetail(false)}
+              <BottomSheet
+                isOpen={isAddingRoomToDetail}
+                onClose={() => setIsAddingRoomToDetail(false)}
+                title={
+                  addRoomMethod === 'select' ? 'Nuevo ambiente' :
+                  addRoomMethod === 'voice' ? 'Dictar ambientes por voz' :
+                  'Carga manual de ambiente'
+                }
+                subtitle={
+                  addRoomMethod === 'select' ? '¿Cómo querés sumar los ambientes?' :
+                  addRoomMethod === 'voice' ? `${selectedPropertyDetail?.name} • Reconocimiento IA` :
+                  `${selectedPropertyDetail?.name} • Teclado`
+                }
+                size={addRoomMethod === 'voice' ? 'full' : 'auto'}
+                showBackButton={addRoomMethod !== 'select'}
+                onBack={() => setAddRoomMethod('select')}
               >
-                <div 
-                  className={addRoomMethod === 'voice' ? "app-quick-modal-sheet app-modal-sheet" : "app-modal-sheet"}
-                  style={addRoomMethod === 'voice' ? styles.quickActionModalSheet : styles.modalSheet} 
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {/* ---- CABECERA DEL MODAL SEGÚN EL MÉTODO ---- */}
-                  <div className="app-modal-header" style={styles.modalHeader}>
-                    <div className="app-modal-handle" style={styles.modalHandle} />
-
-                    {addRoomMethod !== 'select' && (
-                      <div style={{ width: '100%', marginBottom: '10px' }}>
-                        <button 
-                          type="button"
-                          style={styles.stepBackBtn}
-                          onClick={() => setAddRoomMethod('select')}
-                        >
-                          <ChevronLeft size={16} color="#4f46e5" />
-                          <span>Elegir otro método</span>
-                        </button>
-                      </div>
-                    )}
-
-                    <div style={styles.modalTitleRow}>
-                      <div>
-                        <h3 style={styles.modalTitle}>
-                          {addRoomMethod === 'select' && 'Nuevo ambiente'}
-                          {addRoomMethod === 'voice' && 'Dictar ambientes por voz'}
-                          {addRoomMethod === 'manual' && 'Carga manual de ambiente'}
-                        </h3>
-                        <p style={styles.modalSubtitle}>
-                          {addRoomMethod === 'select' && '¿Cómo querés sumar los ambientes?'}
-                          {addRoomMethod === 'voice' && `${selectedPropertyDetail?.name} • Reconocimiento IA`}
-                          {addRoomMethod === 'manual' && `${selectedPropertyDetail?.name} • Teclado`}
-                        </p>
-                      </div>
-                      <button 
-                        type="button"
-                        style={styles.modalCloseBtn} 
-                        onClick={() => setIsAddingRoomToDetail(false)}
-                        aria-label="Cerrar modal"
-                      >
-                        <X size={18} color="#64748b" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="app-modal-content-body" style={styles.modalContentBody}>
                     {/* ---- PASO 1: SELECTOR DE MÉTODO (VOZ O MANUAL) ---- */}
                     {addRoomMethod === 'select' && (
                       <div style={styles.methodChoicesCol}>
@@ -6266,9 +6380,16 @@ export default function App() {
                         {voiceRoomPhase === 'recording' && (
                           <div style={styles.recordingActiveBox}>
                             <div style={styles.recordingTimerRow}>
-                              <span style={styles.liveRecordDot} />
-                              <span style={styles.recordingTimerText}>
+                              <span style={{
+                                ...styles.liveRecordDot,
+                                backgroundColor: voiceRoomTime >= 35 ? '#f59e0b' : '#ef4444'
+                              }} />
+                              <span style={{
+                                ...styles.recordingTimerText,
+                                color: voiceRoomTime >= 35 ? '#ea580c' : '#0f172a'
+                              }}>
                                 {Math.floor(voiceRoomTime / 60).toString().padStart(2, '0')}:{(voiceRoomTime % 60).toString().padStart(2, '0')}
+                                <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: 500, marginLeft: '6px' }}>/ 00:45</span>
                               </span>
                             </div>
 
@@ -6281,7 +6402,9 @@ export default function App() {
                             </div>
 
                             <p style={styles.transcriptionPreview}>
-                              "Escuchando: nombrando ambientes para {selectedPropertyDetail?.name}..."
+                              {voiceRoomTime >= 35 
+                                ? '⚠️ Quedan pocos segundos. Se procesará automáticamente a los 45s.'
+                                : `Escuchando: nombrando ambientes para ${selectedPropertyDetail?.name || 'la propiedad'}...`}
                             </p>
 
                             <button 
@@ -6299,9 +6422,9 @@ export default function App() {
                         {voiceRoomPhase === 'processing' && (
                           <div style={styles.aiProcessingBox}>
                             <div style={styles.aiProcessingIconWrap}>
-                              <Sparkles size={28} color="#0f172a" />
+                              <Loader2 size={26} color="#0f172a" style={{ animation: 'spin 1s linear infinite' }} />
                             </div>
-                            <h4 style={styles.aiProcessingTitle}>Procesando ambientes con IA...</h4>
+                            <h4 style={styles.aiProcessingTitle}>Procesando ambientes...</h4>
                             <p style={styles.aiProcessingSub}>Identificando y separando cada espacio nombrado</p>
                           </div>
                         )}
@@ -6398,12 +6521,25 @@ export default function App() {
                             <div style={styles.reviewActionsCol}>
                               <button 
                                 type="button" 
-                                style={styles.confirmItemsBtn}
+                                style={{
+                                  ...styles.confirmItemsBtn,
+                                  opacity: isConfirmingVoiceRooms ? 0.75 : 1,
+                                  cursor: isConfirmingVoiceRooms ? 'not-allowed' : 'pointer'
+                                }}
                                 onClick={handleConfirmDetectedRooms}
-                                disabled={detectedVoiceRooms.filter(r => r.checked).length === 0}
+                                disabled={isConfirmingVoiceRooms || detectedVoiceRooms.filter(r => r.checked).length === 0}
                               >
-                                <Check size={16} color="#ffffff" strokeWidth={2.4} />
-                                <span>Confirmar e incorporar {detectedVoiceRooms.filter(r => r.checked).length} ambientes</span>
+                                {isConfirmingVoiceRooms ? (
+                                  <>
+                                    <Loader2 size={16} color="#ffffff" style={{ animation: 'spin 1s linear infinite' }} />
+                                    <span>Creando ambientes...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Check size={16} color="#ffffff" strokeWidth={2.4} />
+                                    <span>Confirmar e incorporar {detectedVoiceRooms.filter(r => r.checked).length} ambientes</span>
+                                  </>
+                                )}
                               </button>
 
                               <button 
@@ -6447,9 +6583,7 @@ export default function App() {
                         </button>
                       </form>
                     )}
-                  </div>
-                </div>
-              </div>
+              </BottomSheet>
             )}
 
             <div style={{ height: '70px' }} />
@@ -6544,18 +6678,11 @@ export default function App() {
 
       {/* ============ MODAL CONFIRMAR ELIMINAR PROPIEDAD ============ */}
       {isDeletePropertyModalOpen && selectedPropertyDetail && (
-        <div 
-          className="app-modal-backdrop" 
-          style={styles.modalBackdrop} 
-          onClick={() => !isDeletingProperty && setIsDeletePropertyModalOpen(false)}
+        <BottomSheet
+          isOpen={isDeletePropertyModalOpen}
+          onClose={() => !isDeletingProperty && setIsDeletePropertyModalOpen(false)}
+          size="auto"
         >
-          <div 
-            className="app-modal-sheet" 
-            style={styles.deleteConfirmSheet} 
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={styles.modalHandle} />
-            
             <div style={styles.deleteIconWrap}>
               <Trash2 size={24} color="#ef4444" strokeWidth={2.2} />
             </div>
@@ -6593,8 +6720,7 @@ export default function App() {
                 )}
               </button>
             </div>
-          </div>
-        </div>
+        </BottomSheet>
       )}
 
       {/* ============ MODAL EDITAR PROPIEDAD ============ */}
@@ -6627,108 +6753,99 @@ export default function App() {
 
       {/* ============ MODAL 2: ACCIONES RÁPIDAS (PROPIEDAD -> AMBIENTE -> GRABAR/FOTOS/PLANOS) ============ */}
       {quickActionType && (
-        <div className="app-modal-backdrop" style={styles.modalBackdrop} onClick={closeQuickAction}>
-          <div className="app-quick-modal-sheet" style={styles.quickActionModalSheet} onClick={(e) => e.stopPropagation()}>
-            <div className="app-modal-header" style={styles.modalHeader}>
-              <div className="app-modal-handle" style={styles.modalHandle} />
-              <div style={styles.modalTitleRow}>
-                <div>
-                  <h3 style={styles.modalTitle}>{getActionTitle()}</h3>
-                  <p style={styles.modalSubtitle}>
-                    {actionStep === 1 && 'Seleccioná la propiedad para iniciar'}
-                    {actionStep === 2 && `Ambiente en ${selectedProperty?.name}`}
-                    {actionStep === 3 && `${selectedProperty?.name} • ${selectedRoom}`}
-                  </p>
-                </div>
-                <button style={styles.modalCloseBtn} onClick={closeQuickAction}>
-                  <X size={18} color="#64748b" />
+        <BottomSheet
+          isOpen={!!quickActionType}
+          onClose={closeQuickAction}
+          title={getActionTitle()}
+          subtitle={
+            actionStep === 1 ? 'Seleccioná la propiedad para iniciar' :
+            actionStep === 2 ? `Ambiente en ${selectedProperty?.name}` :
+            `${selectedProperty?.name} • ${selectedRoom}`
+          }
+          size="full"
+          headerExtra={
+            !isDirectRoomAction ? (
+              <div style={styles.stepTabsNav}>
+                {/* Tab 1: Propiedad */}
+                <button 
+                  type="button"
+                  style={{
+                    ...styles.stepTabItem,
+                    ...(actionStep === 1 ? styles.stepTabItemActive : {}),
+                    ...(actionStep > 1 ? styles.stepTabItemDone : {})
+                  }}
+                  onClick={() => {
+                    if (actionStep > 1) setActionStep(1);
+                  }}
+                >
+                  <span style={{
+                    ...styles.stepTabBadge,
+                    ...(actionStep === 1 ? styles.stepTabBadgeActive : {}),
+                    ...(actionStep > 1 ? styles.stepTabBadgeDone : {})
+                  }}>
+                    {actionStep > 1 ? <Check size={11} color="#ffffff" strokeWidth={3} /> : '1'}
+                  </span>
+                  <span style={{
+                    ...styles.stepTabTitle,
+                    ...(actionStep > 1 ? { color: '#0f172a' } : {})
+                  }}>Propiedad</span>
+                </button>
+
+                <div style={styles.stepTabDivider} />
+
+                {/* Tab 2: Ambiente */}
+                <button 
+                  type="button"
+                  style={{
+                    ...styles.stepTabItem,
+                    ...(actionStep === 2 ? styles.stepTabItemActive : {}),
+                    ...(actionStep > 2 ? styles.stepTabItemDone : {}),
+                    ...(!selectedProperty ? styles.stepTabItemDisabled : {})
+                  }}
+                  onClick={() => {
+                    if (selectedProperty && actionStep > 2) setActionStep(2);
+                  }}
+                  disabled={!selectedProperty}
+                >
+                  <span style={{
+                    ...styles.stepTabBadge,
+                    ...(actionStep === 2 ? styles.stepTabBadgeActive : {}),
+                    ...(actionStep > 2 ? styles.stepTabBadgeDone : {})
+                  }}>
+                    {actionStep > 2 ? <Check size={11} color="#ffffff" strokeWidth={3} /> : '2'}
+                  </span>
+                  <span style={{
+                    ...styles.stepTabTitle,
+                    ...(actionStep > 2 ? { color: '#0f172a' } : {})
+                  }}>Ambiente</span>
+                </button>
+
+                <div style={styles.stepTabDivider} />
+
+                {/* Tab 3: Acción */}
+                <button 
+                  type="button"
+                  style={{
+                    ...styles.stepTabItem,
+                    ...(actionStep === 3 ? styles.stepTabItemActive : {}),
+                    ...(!selectedRoom ? styles.stepTabItemDisabled : {})
+                  }}
+                  disabled={!selectedRoom}
+                >
+                  <span style={{
+                    ...styles.stepTabBadge,
+                    ...(actionStep === 3 ? styles.stepTabBadgeActive : {})
+                  }}>
+                    3
+                  </span>
+                  <span style={styles.stepTabTitle}>
+                    {quickActionType === 'voice' ? 'Dictado' : quickActionType === 'photos' ? 'Fotos' : 'Plano'}
+                  </span>
                 </button>
               </div>
-
-              {/* Pestañas numeradas de pasos (Tabs 1, 2, 3) - Solo cuando no es acción directa desde ambiente */}
-              {!isDirectRoomAction && (
-                <div style={styles.stepTabsNav}>
-                  {/* Tab 1: Propiedad */}
-                  <button 
-                    type="button"
-                    style={{
-                      ...styles.stepTabItem,
-                      ...(actionStep === 1 ? styles.stepTabItemActive : {}),
-                      ...(actionStep > 1 ? styles.stepTabItemDone : {})
-                    }}
-                    onClick={() => {
-                      if (actionStep > 1) setActionStep(1);
-                    }}
-                  >
-                    <span style={{
-                      ...styles.stepTabBadge,
-                      ...(actionStep === 1 ? styles.stepTabBadgeActive : {}),
-                      ...(actionStep > 1 ? styles.stepTabBadgeDone : {})
-                    }}>
-                      {actionStep > 1 ? <Check size={11} color="#ffffff" strokeWidth={3} /> : '1'}
-                    </span>
-                    <span style={{
-                      ...styles.stepTabTitle,
-                      ...(actionStep > 1 ? { color: '#0f172a' } : {})
-                    }}>Propiedad</span>
-                  </button>
-
-                  <div style={styles.stepTabDivider} />
-
-                  {/* Tab 2: Ambiente */}
-                  <button 
-                    type="button"
-                    style={{
-                      ...styles.stepTabItem,
-                      ...(actionStep === 2 ? styles.stepTabItemActive : {}),
-                      ...(actionStep > 2 ? styles.stepTabItemDone : {}),
-                      ...(!selectedProperty ? styles.stepTabItemDisabled : {})
-                    }}
-                    onClick={() => {
-                      if (selectedProperty && actionStep > 2) setActionStep(2);
-                    }}
-                    disabled={!selectedProperty}
-                  >
-                    <span style={{
-                      ...styles.stepTabBadge,
-                      ...(actionStep === 2 ? styles.stepTabBadgeActive : {}),
-                      ...(actionStep > 2 ? styles.stepTabBadgeDone : {})
-                    }}>
-                      {actionStep > 2 ? <Check size={11} color="#ffffff" strokeWidth={3} /> : '2'}
-                    </span>
-                    <span style={{
-                      ...styles.stepTabTitle,
-                      ...(actionStep > 2 ? { color: '#0f172a' } : {})
-                    }}>Ambiente</span>
-                  </button>
-
-                  <div style={styles.stepTabDivider} />
-
-                  {/* Tab 3: Acción */}
-                  <button 
-                    type="button"
-                    style={{
-                      ...styles.stepTabItem,
-                      ...(actionStep === 3 ? styles.stepTabItemActive : {}),
-                      ...(!selectedRoom ? styles.stepTabItemDisabled : {})
-                    }}
-                    disabled={!selectedRoom}
-                  >
-                    <span style={{
-                      ...styles.stepTabBadge,
-                      ...(actionStep === 3 ? styles.stepTabBadgeActive : {})
-                    }}>
-                      3
-                    </span>
-                    <span style={styles.stepTabTitle}>
-                      {quickActionType === 'voice' ? 'Dictado' : quickActionType === 'photos' ? 'Fotos' : 'Plano'}
-                    </span>
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div className="app-modal-content-body" style={styles.modalContentBody}>
+            ) : null
+          }
+        >
               {/* ---- PASO 1: SELECCIONAR PROPIEDAD ---- */}
             {actionStep === 1 && (
               <div style={styles.stepContainer}>
@@ -7007,9 +7124,16 @@ export default function App() {
                         <div style={styles.recordingActiveBox}>
                           {/* Indicador de grabación en vivo */}
                           <div style={styles.recordingTimerRow}>
-                            <span style={styles.liveRecordDot} />
-                            <span style={styles.recordingTimerText}>
+                            <span style={{
+                              ...styles.liveRecordDot,
+                              backgroundColor: recordingTime >= 50 ? '#f59e0b' : '#ef4444'
+                            }} />
+                            <span style={{
+                              ...styles.recordingTimerText,
+                              color: recordingTime >= 50 ? '#ea580c' : '#0f172a'
+                            }}>
                               {Math.floor(recordingTime / 60).toString().padStart(2, '0')}:{(recordingTime % 60).toString().padStart(2, '0')}
+                              <span style={{ fontSize: '13px', color: '#94a3b8', fontWeight: 500, marginLeft: '6px' }}>/ 01:00</span>
                             </span>
                           </div>
 
@@ -7023,7 +7147,9 @@ export default function App() {
                           </div>
 
                           <p style={styles.transcriptionPreview}>
-                            "Escuchando: {selectedRoom}... describiendo elementos y terminaciones"
+                            {recordingTime >= 50
+                              ? '⚠️ Quedan pocos segundos. Se procesará automáticamente al minuto.'
+                              : `"Escuchando: ${selectedRoom || 'el ambiente'}... describiendo elementos y terminaciones"`}
                           </p>
 
                           {/* Botón sobrio y elegante para detener (NO ROJO) */}
@@ -7038,13 +7164,13 @@ export default function App() {
                         </div>
                       )}
 
-                      {/* FASE 3: PROCESANDO CON IA */}
+                      {/* FASE 3: PROCESANDO */}
                       {voicePhase === 'processing' && (
                         <div style={styles.aiProcessingBox}>
                           <div style={styles.aiProcessingIconWrap}>
-                            <Sparkles size={28} color="#0f172a" />
+                            <Loader2 size={26} color="#0f172a" style={{ animation: 'spin 1s linear infinite' }} />
                           </div>
-                          <h4 style={styles.aiProcessingTitle}>Procesando dictado con IA...</h4>
+                          <h4 style={styles.aiProcessingTitle}>Procesando dictado...</h4>
                           <p style={styles.aiProcessingSub}>Extrayendo elementos, materiales y estados para {selectedRoom}</p>
                         </div>
                       )}
@@ -7224,11 +7350,25 @@ export default function App() {
                           <div style={styles.reviewActionsCol}>
                             <button 
                               type="button"
-                              style={styles.confirmItemsBtn}
+                              style={{
+                                ...styles.confirmItemsBtn,
+                                opacity: isConfirmingVoiceItems ? 0.75 : 1,
+                                cursor: isConfirmingVoiceItems ? 'not-allowed' : 'pointer'
+                              }}
                               onClick={handleConfirmVoiceItems}
+                              disabled={isConfirmingVoiceItems || extractedItems.filter(i => i.checked).length === 0}
                             >
-                              <Check size={16} color="#ffffff" strokeWidth={2.4} />
-                              <span>Confirmar e incorporar al inventario</span>
+                              {isConfirmingVoiceItems ? (
+                                <>
+                                  <Loader2 size={16} color="#ffffff" style={{ animation: 'spin 1s linear infinite' }} />
+                                  <span>Guardando ítems...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Check size={16} color="#ffffff" strokeWidth={2.4} />
+                                  <span>Confirmar e incorporar al inventario</span>
+                                </>
+                              )}
                             </button>
 
                             <button 
@@ -7261,17 +7401,36 @@ export default function App() {
 
                     {roomPhotos.length === 0 ? (
                       <div style={styles.readyRecordBox}>
-                        <button 
-                          type="button"
-                          style={styles.cameraUploadButton}
-                          onClick={() => roomPhotoInputRef.current?.click()}
-                        >
-                          <Camera size={34} color="#ffffff" strokeWidth={2.2} />
-                        </button>
                         <h4 style={styles.recordActionTitle}>Tomar o subir fotos de {selectedRoom}</h4>
                         <p style={styles.recordActionHint}>
-                          Podés subir varias fotos. La IA detectará artefactos, acabados y detalles automáticamente.
+                          Podés sacar varias fotos de corrido. La IA detectará artefactos, acabados y detalles automáticamente.
                         </p>
+                        <div style={{ display: 'flex', gap: '10px', width: '100%', marginTop: '8px' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenCamera('room')}
+                            style={{
+                              flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
+                              padding: '16px 8px', borderRadius: '14px', border: '2px dashed #c7d2fe',
+                              backgroundColor: '#f0f4ff', cursor: 'pointer', fontFamily: 'inherit',
+                            }}
+                          >
+                            <Camera size={24} color="#0284c7" strokeWidth={2.2} />
+                            <span style={{ fontSize: '12px', fontWeight: '700', color: '#0f172a' }}>Tomar fotos</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => roomPhotoInputRef.current?.click()}
+                            style={{
+                              flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
+                              padding: '16px 8px', borderRadius: '14px', border: '2px dashed #c7d2fe',
+                              backgroundColor: '#f8f9ff', cursor: 'pointer', fontFamily: 'inherit',
+                            }}
+                          >
+                            <Images size={24} color="#4f46e5" strokeWidth={2.2} />
+                            <span style={{ fontSize: '12px', fontWeight: '700', color: '#0f172a' }}>Galería</span>
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -7487,10 +7646,17 @@ export default function App() {
               </div>
             )}
 
-            </div>
-          </div>
-        </div>
+
+        </BottomSheet>
       )}
+
+      {/* ============ CÁMARA IN-APP PARA CAPTURA MÚLTIPLE ============ */}
+      <CameraCapture
+        isOpen={isCameraOpen}
+        onClose={() => setIsCameraOpen(false)}
+        onPhotosReady={handleCameraPhotosReady}
+        maxPhotos={20 - photoItemFiles.length}
+      />
 
       {/* ============ SUPER EDITOR MÓVIL DE PLANO A PANTALLA COMPLETA ============ */}
       {isFloorPlanEditorOpen && selectedPropertyDetail && (
@@ -7528,6 +7694,12 @@ export default function App() {
           agents={agents}
           agency={agency}
           onUpdateSharedWith={async (propertyId, sharedAgentIds) => {
+            const res = await propertyService.shareProperty(propertyId, sharedAgentIds);
+            if (!res || res.success === false) {
+              const errorMsg = res?.message || res?.error || 'Error al guardar cambios de compartir en el servidor';
+              throw new Error(errorMsg);
+            }
+
             const count = sharedAgentIds.length;
             setSelectedPropertyDetail(prev => prev && prev.id === propertyId ? { 
               ...prev, 
@@ -7544,11 +7716,7 @@ export default function App() {
               sharedCount: count,
             } : p));
 
-            try {
-              await propertyService.shareProperty(propertyId, sharedAgentIds);
-            } catch (err) {
-              console.warn('Error guardando usuarios compartidos en backend:', err);
-            }
+            return res;
           }}
         />
       )}
@@ -7591,6 +7759,9 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
+    cursor: 'pointer',
+    userSelect: 'none',
+    WebkitTapHighlightColor: 'transparent',
   },
   logo: {
     height: '30px',
@@ -7630,7 +7801,7 @@ const styles = {
     height: '100%',
     maxHeight: '100%',
     backgroundColor: '#ffffff',
-    padding: '24px 20px',
+    padding: 'calc(env(safe-area-inset-top, 0px) + 24px) 20px calc(env(safe-area-inset-bottom, 0px) + 24px) 20px',
     boxShadow: '-4px 0 24px rgba(0, 0, 0, 0.1)',
     display: 'flex',
     flexDirection: 'column',
@@ -8167,14 +8338,17 @@ const styles = {
     color: '#94a3b8',
   },
   propRoomsTag: {
-    display: 'inline-block',
+    display: 'inline-flex',
+    alignItems: 'center',
     fontSize: '11px',
     fontWeight: '600',
     color: '#475569',
     backgroundColor: '#f1f5f9',
     padding: '2px 7px',
     borderRadius: '6px',
-    marginTop: '4px',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+    lineHeight: '15px',
   },
   tabPaginationRow: {
     display: 'flex',
@@ -8293,6 +8467,7 @@ const styles = {
   propertyListInfo: {
     flex: 1,
     minWidth: 0,
+    overflow: 'hidden',
   },
   propertyListTitle: {
     fontSize: '15px',
@@ -8301,15 +8476,57 @@ const styles = {
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
+    margin: 0,
+    lineHeight: 1.25,
   },
   propertyListAddress: {
     fontSize: '12px',
     color: '#64748b',
     marginTop: '2px',
+    marginBottom: 0,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     display: 'block',
+    lineHeight: 1.25,
+  },
+  propertyListMetaRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    marginTop: '4px',
+    flexWrap: 'nowrap',
+    overflow: 'hidden',
+  },
+  propSharedBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '2px 5px',
+    borderRadius: '6px',
+    background: 'linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%)',
+    color: '#4338ca',
+    fontSize: '11px',
+    fontWeight: '600',
+    border: '1px solid #c7d2fe',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+    lineHeight: '15px',
+  },
+  propSharedByMeBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '3px',
+    padding: '2px 6px',
+    borderRadius: '6px',
+    backgroundColor: '#f0fdf4',
+    color: '#15803d',
+    fontSize: '11px',
+    fontWeight: '600',
+    border: '1px solid #bbf7d0',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+    lineHeight: '15px',
   },
   adminMiniBtn: {
     display: 'flex',
@@ -8340,8 +8557,8 @@ const styles = {
     justifyContent: 'space-around',
     paddingLeft: '24px',
     paddingRight: '24px',
-    height: '74px',
-    paddingBottom: 'max(16px, env(safe-area-inset-bottom, 16px))',
+    paddingTop: '10px',
+    paddingBottom: 'max(12px, env(safe-area-inset-bottom, 12px))',
     backgroundColor: '#ffffff',
     borderTopLeftRadius: '24px',
     borderTopRightRadius: '24px',

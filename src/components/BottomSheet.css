@@ -1,0 +1,239 @@
+/* =========================================================================
+   BOTTOM SHEET — iOS-native style component
+   ========================================================================= */
+
+/* Backdrop */
+.bs-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(15, 23, 42, 0.48);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 150;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  opacity: 0;
+  transition: opacity 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  will-change: opacity;
+}
+
+.bs-backdrop.bs-visible {
+  opacity: 1;
+}
+
+.bs-backdrop.bs-closing {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Stacked modal: higher z-index */
+.bs-backdrop.bs-stacked {
+  z-index: 1200;
+}
+
+/* Sheet */
+.bs-sheet {
+  position: relative;
+  width: 100%;
+  max-width: 500px;
+  background-color: #ffffff;
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  padding: 0 20px;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -12px 48px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: translateY(100%);
+  transition: transform 0.38s cubic-bezier(0.32, 0.72, 0, 1);
+  will-change: transform;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.bs-backdrop.bs-visible .bs-sheet {
+  transform: translateY(0);
+}
+
+.bs-backdrop.bs-closing .bs-sheet {
+  transform: translateY(100%);
+}
+
+/* Dragging: remove transition so it follows the finger */
+.bs-sheet.bs-dragging {
+  transition: none !important;
+}
+
+/* ---- Size variants ---- */
+
+/* Auto: adapts to content */
+.bs-sheet.bs-size-auto {
+  max-height: 85vh;
+  max-height: 85dvh;
+  height: auto;
+}
+
+/* Medium: ~60% of screen */
+.bs-sheet.bs-size-medium {
+  height: 62vh;
+  height: 62dvh;
+  max-height: 62vh;
+  max-height: 62dvh;
+}
+
+/* Full: almost entire screen */
+.bs-sheet.bs-size-full {
+  height: calc(100dvh - 54px);
+  max-height: calc(100dvh - 54px);
+  min-height: calc(100dvh - 54px);
+}
+
+/* ---- Handle (drag indicator) ---- */
+.bs-handle-area {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  padding: 10px 0 6px 0;
+  cursor: grab;
+  touch-action: none;
+}
+
+.bs-handle-area:active {
+  cursor: grabbing;
+}
+
+.bs-handle-pill {
+  width: 36px;
+  height: 5px;
+  border-radius: 3px;
+  background-color: #d1d5db;
+}
+
+/* ---- Header ---- */
+.bs-header {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 0 12px 0;
+}
+
+.bs-back-row {
+  margin-bottom: 8px;
+}
+
+.bs-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: #4f46e5;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.bs-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.bs-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.2px;
+  margin: 0;
+  line-height: 1.3;
+}
+
+.bs-subtitle {
+  font-size: 12.5px;
+  color: #64748b;
+  margin: 3px 0 0 0;
+  line-height: 1.4;
+}
+
+.bs-close-btn {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  border-radius: 50%;
+  background-color: #f1f5f9;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease;
+}
+
+.bs-close-btn:active {
+  background-color: #e2e8f0;
+}
+
+/* ---- Content body ---- */
+.bs-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding-bottom: 4px;
+}
+
+/* Hide scrollbar for cleaner iOS feel */
+.bs-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.bs-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.bs-body::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 4px;
+}
+
+/* ---- Body scroll lock when sheet is open ---- */
+html.bs-scroll-lock,
+html.bs-scroll-lock body {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
+
+html.bs-scroll-lock body #root {
+  overflow: hidden !important;
+}
+
+/* Allow scroll inside the sheet */
+html.bs-scroll-lock .bs-body {
+  overflow-y: auto !important;
+  touch-action: pan-y !important;
+}
+
+/* ---- Landscape / short screens ---- */
+@media (max-height: 500px), (orientation: landscape) and (max-height: 600px) {
+  .bs-sheet.bs-size-full {
+    height: calc(100dvh - 12px);
+    max-height: calc(100dvh - 12px);
+    min-height: calc(100dvh - 12px);
+  }
+
+  .bs-sheet.bs-size-medium {
+    height: calc(100dvh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+}

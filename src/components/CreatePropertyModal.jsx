@@ -26,9 +26,8 @@ import {
   Sparkles,
   ArrowRight
 } from 'lucide-react';
-import logoAnda from '../assets/logoAnda.webp';
-import logoSancor from '../assets/logoSancor.webp';
 import { propertyService } from '../services/propertyService';
+import BottomSheet from './BottomSheet';
 
 export default function CreatePropertyModal({
   isOpen,
@@ -44,9 +43,7 @@ export default function CreatePropertyModal({
     name: '',
     address: '',
     tipo: 'apto',
-    numeroApto: '',
     image: null,
-    seguro: '',
   });
 
   const [scrapeUrl, setScrapeUrl] = useState('');
@@ -60,40 +57,7 @@ export default function CreatePropertyModal({
   const [fieldErrors, setFieldErrors] = useState({
     name: '',
     address: '',
-    numeroApto: '',
   });
-
-  // Bloquear el scroll de fondo cuando el modal esté abierto
-  useEffect(() => {
-    if (!isOpen) return;
-
-    document.documentElement.classList.add('app-modal-open');
-    document.body.classList.add('app-modal-open');
-
-    const scrollContainers = document.querySelectorAll('main, .app-detail-main, .app-main-content, .app-container');
-    const prevStyles = [];
-    scrollContainers.forEach(el => {
-      prevStyles.push({
-        el,
-        overflow: el.style.overflow,
-        overflowY: el.style.overflowY,
-        touchAction: el.style.touchAction
-      });
-      el.style.overflow = 'hidden';
-      el.style.overflowY = 'hidden';
-      el.style.touchAction = 'none';
-    });
-
-    return () => {
-      document.documentElement.classList.remove('app-modal-open');
-      document.body.classList.remove('app-modal-open');
-      prevStyles.forEach(({ el, overflow, overflowY, touchAction }) => {
-        el.style.overflow = overflow;
-        el.style.overflowY = overflowY;
-        el.style.touchAction = touchAction;
-      });
-    };
-  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -103,16 +67,14 @@ export default function CreatePropertyModal({
       name: '',
       address: '',
       tipo: 'apto',
-      numeroApto: '',
       image: null,
-      seguro: '',
     });
     setScrapeUrl('');
     setScrapeError('');
     setScrapedAmbients(null);
     setScrapedImageUrl(null);
     setWasScraped(false);
-    setFieldErrors({ name: '', address: '', numeroApto: '' });
+    setFieldErrors({ name: '', address: '' });
     setIsSubmitting(false);
     setIsScraping(false);
   };
@@ -127,14 +89,6 @@ export default function CreatePropertyModal({
     setFormData(prev => ({ ...prev, [name]: value }));
     if (fieldErrors[name]) {
       setFieldErrors(prev => ({ ...prev, [name]: '' }));
-    }
-  };
-
-  const handleNumeroAptoChange = (e) => {
-    const val = e.target.value;
-    setFormData(prev => ({ ...prev, numeroApto: val }));
-    if (fieldErrors.numeroApto) {
-      setFieldErrors(prev => ({ ...prev, numeroApto: '' }));
     }
   };
 
@@ -237,7 +191,7 @@ export default function CreatePropertyModal({
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    const errors = { name: '', address: '', numeroApto: '' };
+    const errors = { name: '', address: '' };
     let hasError = false;
 
     if (!formData.name.trim()) {
@@ -248,10 +202,6 @@ export default function CreatePropertyModal({
       errors.address = 'Falta ingresar la dirección';
       hasError = true;
     }
-    if (formData.tipo === 'apto' && !formData.numeroApto.trim()) {
-      errors.numeroApto = 'Falta ingresar el número de apartamento';
-      hasError = true;
-    }
 
     setFieldErrors(errors);
     if (hasError) return;
@@ -259,14 +209,17 @@ export default function CreatePropertyModal({
     setIsSubmitting(true);
     try {
       const finalImage = formData.image || scrapedImageUrl || null;
-      const finalAmbients = (scrapedAmbients || []).filter(a => a.name && a.name.trim().length > 0);
+      // Los ambientes solo aplican si se creó importando con el link y se detectaron ambientes
+      const finalAmbients = (creationMode === 'link' && wasScraped)
+        ? (scrapedAmbients || []).filter(a => a.name && a.name.trim().length > 0)
+        : [];
 
       const payload = {
         name: formData.name.trim(),
         location: formData.address.trim(),
         address: formData.address.trim(),
         type: formData.tipo,
-        apartment_number: formData.tipo === 'apto' ? formData.numeroApto.trim() : null,
+        apartment_number: (formData.tipo === 'apto' && formData.numeroApto) ? formData.numeroApto.trim() : null,
         image_url: finalImage,
         typeSeguro: formData.seguro || null,
         ambients: finalAmbients,
@@ -285,34 +238,24 @@ export default function CreatePropertyModal({
   };
 
   return (
-    <div className="app-modal-backdrop" style={styles.modalBackdrop} onClick={handleClose}>
-      <div className="app-modal-sheet" style={styles.modalSheet} onClick={(e) => e.stopPropagation()}>
-        <div style={styles.modalHandle} />
-
-        <div style={styles.modalTopRow}>
-          <div>
-            <h4 style={styles.modalTitle}>
-              {creationMode === null && 'Nueva Propiedad'}
-              {creationMode === 'link' && 'Importar desde Portal o Inmobiliaria'}
-              {creationMode === 'manual' && 'Crear Propiedad Manualmente'}
-            </h4>
-            <p style={styles.modalSubtitle}>
-              {creationMode === null && 'Selecciona el método de creación'}
-              {creationMode === 'link' && (wasScraped ? 'Revisa la información antes de guardar' : 'Pega la URL de la publicación para analizar')}
-              {creationMode === 'manual' && 'Ingresa los datos para registrar la propiedad'}
-            </p>
-          </div>
-          <button 
-            type="button" 
-            style={styles.modalCloseBtn}
-            onClick={handleClose}
-            disabled={isSubmitting || isScraping}
-          >
-            <X size={16} color="#64748b" />
-          </button>
-        </div>
-
-        <div className="app-modal-content-body no-scrollbar" style={styles.modalContentScroll}>
+    <BottomSheet
+      isOpen={isOpen}
+      onClose={handleClose}
+      title={
+        creationMode === null ? 'Nueva Propiedad' :
+        creationMode === 'link' ? 'Importar desde Portal o Inmobiliaria' :
+        'Crear Propiedad Manualmente'
+      }
+      subtitle={
+        creationMode === null ? 'Selecciona el método de creación' :
+        creationMode === 'link' ? (wasScraped ? 'Revisa la información antes de guardar' : 'Pega la URL de la publicación para analizar') :
+        'Ingresa los datos para registrar la propiedad'
+      }
+      size="full"
+      showBackButton={creationMode !== null}
+      onBack={() => setCreationMode(null)}
+      backLabel="Elegir otro método"
+    >
           {/* =========================================================================
               PASO 0: SELECCIÓN DE MODO DE CREACIÓN
               ========================================================================= */}
@@ -565,162 +508,93 @@ export default function CreatePropertyModal({
                     {fieldErrors.address && <span style={styles.errorText}>{fieldErrors.address}</span>}
                   </div>
 
-                  {/* Tipo y Número de Apto en Fila */}
-                  <div style={styles.formRow}>
-                    <div style={{ ...styles.inputStack, flex: 1 }}>
-                      <label style={styles.label}>Tipo de Propiedad *</label>
-                      <select 
-                        name="tipo"
-                        value={formData.tipo}
-                        onChange={handleInputChange}
-                        style={styles.selectField}
-                      >
-                        <option value="apto">Apartamento</option>
-                        <option value="house">Casa</option>
-                        <option value="local">Local Comercial</option>
-                      </select>
-                    </div>
-
-                    {formData.tipo === 'apto' && (
-                      <div style={{ ...styles.inputStack, flex: 1 }}>
-                        <label style={styles.label}>Número de Apto *</label>
-                        <input 
-                          type="text"
-                          name="numeroApto"
-                          placeholder="Ej: 301, 12A..."
-                          value={formData.numeroApto}
-                          onChange={handleNumeroAptoChange}
-                          style={{
-                            ...styles.inputField,
-                            ...(fieldErrors.numeroApto ? styles.inputFieldError : {})
-                          }}
-                          required
-                        />
-                        {fieldErrors.numeroApto && <span style={styles.errorText}>{fieldErrors.numeroApto}</span>}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Sección de Ambientes */}
-                  <div style={styles.ambientsSection}>
-                    <div style={styles.ambientsHeader}>
-                      <div>
-                        <h5 style={styles.ambientsTitle}>
-                          Ambientes {scrapedAmbients ? `(${scrapedAmbients.length})` : '(0)'}
-                        </h5>
-                        <p style={styles.ambientsSubtitle}>
-                          {creationMode === 'link' 
-                            ? 'Revisa los ambientes detectados por IA. Edita nombres, tipos o elimina.'
-                            : 'Agrega los ambientes reales de la propiedad o déjala vacía para relevar luego.'}
-                        </p>
-                      </div>
-                      <button 
-                        type="button" 
-                        style={styles.addAmbientBtn}
-                        onClick={handleAddAmbient}
-                      >
-                        <Plus size={13} strokeWidth={2.5} />
-                        <span>Agregar</span>
-                      </button>
-                    </div>
-
-                    {scrapedAmbients && scrapedAmbients.length > 0 ? (
-                      <div style={styles.ambientsList}>
-                        {scrapedAmbients.map((amb, idx) => {
-                          const IconComp = getAmbientIcon(amb.type);
-                          return (
-                            <div key={idx} style={styles.ambientRow}>
-                              <div style={styles.ambientIconBox}>
-                                <IconComp size={15} color="#4f46e5" />
-                              </div>
-                              <input 
-                                type="text"
-                                value={amb.name}
-                                onChange={(e) => handleUpdateAmbient(idx, e.target.value, amb.type)}
-                                placeholder="Nombre del ambiente"
-                                style={styles.ambientInput}
-                                required
-                              />
-                              <select 
-                                value={amb.type}
-                                onChange={(e) => handleUpdateAmbient(idx, amb.name, e.target.value)}
-                                style={styles.ambientSelect}
-                              >
-                                <option value="living">Living</option>
-                                <option value="comedor">Comedor</option>
-                                <option value="cocina">Cocina</option>
-                                <option value="habitacion">Dormitorio</option>
-                                <option value="baño">Baño</option>
-                                <option value="terraza">Terraza</option>
-                                <option value="patio">Patio</option>
-                                <option value="garaje">Garaje</option>
-                                <option value="gimnasio">Gimnasio</option>
-                                <option value="otro">Otro</option>
-                              </select>
-                              <button 
-                                type="button" 
-                                style={styles.ambientDelBtn}
-                                onClick={() => handleDeleteAmbient(idx)}
-                                title="Eliminar ambiente"
-                              >
-                                <Trash2 size={14} color="#ef4444" />
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div style={styles.noAmbientsBox}>
-                        <span>Propiedad limpia sin ambientes automáticos.</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Selector de Aseguradora */}
+                  {/* Tipo de Propiedad */}
                   <div style={styles.inputStack}>
-                    <label style={styles.label}>Garantía / Aseguradora (Opcional)</label>
-                    <div style={styles.seguroGrid}>
-                      <button 
-                        type="button" 
-                        style={{
-                          ...styles.seguroCard,
-                          ...(formData.seguro === 'anda' ? styles.seguroCardSelected : {})
-                        }}
-                        onClick={() => setFormData(prev => ({ ...prev, seguro: prev.seguro === 'anda' ? '' : 'anda' }))}
-                      >
-                        <div style={styles.seguroLogoWrap}>
-                          <img src={logoAnda} alt="ANDA" style={styles.seguroLogoImg} />
-                        </div>
-                        <span style={styles.seguroName}>Garantía ANDA</span>
-                        {formData.seguro === 'anda' && (
-                          <span style={styles.seguroCheckBadge}>
-                            <Check size={11} color="#ffffff" strokeWidth={3} />
-                          </span>
-                        )}
-                      </button>
-
-                      <button 
-                        type="button" 
-                        style={{
-                          ...styles.seguroCard,
-                          ...(formData.seguro === 'sancor' ? styles.seguroCardSelected : {})
-                        }}
-                        onClick={() => setFormData(prev => ({ ...prev, seguro: prev.seguro === 'sancor' ? '' : 'sancor' }))}
-                      >
-                        <div style={styles.seguroLogoWrap}>
-                          <img src={logoSancor} alt="Sancor" style={styles.seguroLogoImg} />
-                        </div>
-                        <span style={styles.seguroName}>Sancor Seguros</span>
-                        {formData.seguro === 'sancor' && (
-                          <span style={styles.seguroCheckBadge}>
-                            <Check size={11} color="#ffffff" strokeWidth={3} />
-                          </span>
-                        )}
-                      </button>
-                    </div>
+                    <label style={styles.label}>Tipo de Propiedad *</label>
+                    <select 
+                      name="tipo"
+                      value={formData.tipo}
+                      onChange={handleInputChange}
+                      style={styles.selectField}
+                    >
+                      <option value="apto">Apartamento</option>
+                      <option value="house">Casa</option>
+                      <option value="local">Local Comercial</option>
+                    </select>
                   </div>
 
-                  {/* Botón Guardar */}
+                  {/* Ambientes detectados (SOLO aparece si se creó con link de portal y fue analizado) */}
+                  {creationMode === 'link' && wasScraped && (
+                    <div style={styles.ambientsSection}>
+                      <div style={styles.ambientsHeader}>
+                        <div>
+                          <h4 style={styles.ambientsTitle}>Ambientes detectados ({scrapedAmbients?.length || 0})</h4>
+                          <p style={styles.ambientsSubtitle}>
+                            Puedes editar los nombres, tipos o eliminar los que no correspondan.
+                          </p>
+                        </div>
+                        <button 
+                          type="button" 
+                          style={styles.addAmbientBtn}
+                          onClick={handleAddAmbient}
+                        >
+                          <Plus size={13} strokeWidth={2.5} />
+                          <span>Agregar</span>
+                        </button>
+                      </div>
+
+                      <div style={styles.ambientsList}>
+                        {scrapedAmbients && scrapedAmbients.length > 0 ? (
+                          scrapedAmbients.map((ambient, idx) => {
+                            const IconComponent = getAmbientIcon(ambient.type);
+                            return (
+                              <div key={idx} style={styles.ambientRow}>
+                                <div style={styles.ambientIconBox}>
+                                  <IconComponent size={14} color="#4f46e5" />
+                                </div>
+                                <input 
+                                  type="text"
+                                  value={ambient.name}
+                                  placeholder="Nombre del ambiente..."
+                                  onChange={(e) => handleUpdateAmbient(idx, e.target.value, ambient.type)}
+                                  style={styles.ambientInput}
+                                />
+                                <select 
+                                  value={ambient.type || 'otro'}
+                                  onChange={(e) => handleUpdateAmbient(idx, ambient.name, e.target.value)}
+                                  style={styles.ambientSelect}
+                                >
+                                  <option value="living">Living</option>
+                                  <option value="comedor">Comedor</option>
+                                  <option value="cocina">Cocina</option>
+                                  <option value="habitacion">Dormitorio</option>
+                                  <option value="baño">Baño</option>
+                                  <option value="terraza">Terraza / Balcón</option>
+                                  <option value="patio">Patio / Jardín</option>
+                                  <option value="garaje">Garaje</option>
+                                  <option value="gimnasio">Gimnasio</option>
+                                  <option value="otro">Otro</option>
+                                </select>
+                                <button 
+                                  type="button"
+                                  style={styles.ambientDelBtn}
+                                  onClick={() => handleDeleteAmbient(idx)}
+                                  title="Eliminar ambiente"
+                                  aria-label="Eliminar ambiente"
+                                >
+                                  <Trash2 size={14} color="#ef4444" />
+                                </button>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div style={styles.noAmbientsBox}>
+                            No hay ambientes en la lista. Puedes agregar los tuyos con el botón "Agregar".
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <button 
                     type="submit" 
                     style={{
@@ -746,9 +620,7 @@ export default function CreatePropertyModal({
               )}
             </form>
           )}
-        </div>
-      </div>
-    </div>
+    </BottomSheet>
   );
 }
 

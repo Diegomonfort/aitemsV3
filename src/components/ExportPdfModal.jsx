@@ -21,6 +21,7 @@ import logoAnda from '../assets/logoAnda.webp';
 import logoSancor from '../assets/logoSancor.webp';
 import { pdfService } from '../services/pdfService';
 import { propertyService } from '../services/propertyService';
+import BottomSheet from './BottomSheet';
 
 const INSURANCE_OPTIONS = [
   { id: 'anda', name: 'ANDA', logo: logoAnda, label: 'Garantía ANDA' },
@@ -237,87 +238,18 @@ export default function ExportPdfModal({
   };
 
   // Bloquear el scroll del fondo mientras el modal esté abierto
-  useEffect(() => {
-    if (!isOpen) return;
 
-    // 1. Activar clase universal en html y body
-    document.documentElement.classList.add('app-modal-open');
-    document.body.classList.add('app-modal-open');
-
-    // 2. Congelar directamente contenedores principales con scroll en la app
-    const scrollContainers = document.querySelectorAll('main, .app-detail-main, .app-main-content, .app-container');
-    const prevStyles = [];
-    scrollContainers.forEach(el => {
-      prevStyles.push({
-        el,
-        overflow: el.style.overflow,
-        overflowY: el.style.overflowY,
-        touchAction: el.style.touchAction
-      });
-      el.style.overflow = 'hidden';
-      el.style.overflowY = 'hidden';
-      el.style.touchAction = 'none';
-    });
-
-    return () => {
-      document.documentElement.classList.remove('app-modal-open');
-      document.body.classList.remove('app-modal-open');
-      prevStyles.forEach(({ el, overflow, overflowY, touchAction }) => {
-        el.style.overflow = overflow;
-        el.style.overflowY = overflowY;
-        el.style.touchAction = touchAction;
-      });
-    };
-  }, [isOpen]);
 
   const selectedInsuranceObj = INSURANCE_OPTIONS.find(o => o.id === selectedInsurance);
 
   return (
-    <div 
-      className="export-pdf-backdrop" 
-      style={styles.backdrop} 
-      onClick={step === 'generating' ? undefined : onClose}
-      onTouchMove={(e) => {
-        if (!e.target.closest('.export-pdf-body')) {
-          e.preventDefault();
-        }
-      }}
-      onWheel={(e) => {
-        if (!e.target.closest('.export-pdf-body')) {
-          e.preventDefault();
-        }
-      }}
+    <BottomSheet
+      isOpen={isOpen}
+      onClose={step === 'generating' ? () => {} : onClose}
+      title={step === 'success' ? 'Inventario listo' : 'Exportar Inventario'}
+      subtitle={property.name}
+      size="full"
     >
-      <div 
-        className="export-pdf-sheet" 
-        style={styles.sheet} 
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div 
-          style={styles.header}
-          onTouchMove={(e) => e.preventDefault()}
-        >
-          <div style={styles.headerRow}>
-            <div>
-              <h3 style={styles.title}>
-                {step === 'success' ? 'Inventario listo' : 'Exportar Inventario'}
-              </h3>
-              <p style={styles.subtitle}>{property.name}</p>
-            </div>
-            {step !== 'generating' && (
-              <button 
-                type="button" 
-                style={styles.closeBtn} 
-                onClick={onClose}
-                aria-label="Cerrar"
-              >
-                <X size={18} color="#64748b" />
-              </button>
-            )}
-          </div>
-        </div>
-
         {/* CONTENIDO SEGÚN PASO */}
         <div className="export-pdf-body no-scrollbar" style={styles.body}>
 
@@ -706,8 +638,7 @@ export default function ExportPdfModal({
           )}
 
         </div>
-      </div>
-    </div>
+    </BottomSheet>
   );
 }
 

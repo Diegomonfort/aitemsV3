@@ -37,6 +37,7 @@ async function request(endpoint, options = {}) {
   const headers = {
     ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    'ngrok-skip-browser-warning': 'true',
     ...options.headers,
   };
 
