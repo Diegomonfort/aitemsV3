@@ -2,12 +2,13 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { X, Camera, RotateCw, Check, Images } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { pickFromGallery } from '../utils/nativeCamera';
 
 /**
  * CameraCapture — Cámara fullscreen in-app para captura múltiple rápida.
  * 
- * Intenta usar getUserMedia para un visor en vivo. Si falla (permisos, WebView),
- * usa @capacitor/camera para abrir la cámara nativa de iOS en loop.
+ * Abre un visor en vivo de video fullscreen. Cada toque captura una foto
+ * instantánea y la acumula en la bandeja inferior sin cerrar la cámara.
  */
 export default function CameraCapture({ isOpen, onClose, onPhotosReady, maxPhotos = 20 }) {
   const videoRef = useRef(null);
@@ -19,35 +20,74 @@ export default function CameraCapture({ isOpen, onClose, onPhotosReady, maxPhoto
   const [error, setError] = useState(null);
   const [lastFlash, setLastFlash] = useState(false);
   const [mode, setMode] = useState('loading'); // 'loading' | 'stream' | 'native'
+  const [activeStream, setActiveStream] = useState(null);
   const isMountedRef = useRef(true);
 
-  // ── Iniciar cámara con getUserMedia ──
-  const startCamera = useCallback(async (facing) => {
+  // ── Detener tracks activos ──
+  const stopCurrentStream = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
+    setActiveStream(null);
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  }, []);
 
+  // ── Iniciar cámara con getUserMedia ──
+  const startCamera = useCallback(async (facing) => {
+    stopCurrentStream();
     setIsReady(false);
     setError(null);
     setMode('loading');
 
     try {
-      // Verificar si getUserMedia está disponible
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error('getUserMedia not available');
+      // 1. Asegurar permiso de cámara a nivel de Android / iOS nativo
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const check = await CapCamera.checkPermissions();
+          if (check.camera !== 'granted') {
+            const req = await CapCamera.requestPermissions({ permissions: ['camera'] });
+            if (req.camera !== 'granted') {
+              throw new Error('Permiso de cámara denegado');
+            }
+          }
+        } catch (permErr) {
+          console.warn('[CameraCapture] Verificación de permisos nativos:', permErr);
+        }
       }
 
-      const constraints = {
-        video: {
-          facingMode: facing || facingMode,
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-        audio: false,
-      };
+      // 2. Verificar si getUserMedia está disponible
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new Error('getUserMedia no disponible');
+      }
 
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      let stream = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: facing || facingMode,
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+          audio: false,
+        });
+      } catch (constraintErr) {
+        console.warn('[CameraCapture] Fallback a constraints flexibles:', constraintErr);
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: facing || facingMode },
+            audio: false,
+          });
+        } catch (f2Err) {
+          console.warn('[CameraCapture] Fallback a video genérico:', f2Err);
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        }
+      }
       
       if (!isMountedRef.current) {
         stream.getTracks().forEach(t => t.stop());
@@ -55,28 +95,39 @@ export default function CameraCapture({ isOpen, onClose, onPhotosReady, maxPhoto
       }
       
       streamRef.current = stream;
+      setActiveStream(stream);
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = () => {
-          if (videoRef.current) {
-            videoRef.current.play().then(() => {
-              if (isMountedRef.current) {
-                setIsReady(true);
-                setMode('stream');
-              }
-            });
-          }
-        };
+        try {
+          await videoRef.current.play();
+        } catch (playErr) {
+          console.warn('[CameraCapture] video play error:', playErr);
+        }
+      }
+
+      if (isMountedRef.current) {
+        setIsReady(true);
+        setMode('stream');
       }
     } catch (err) {
-      console.warn('[CameraCapture] getUserMedia falló, usando cámara nativa:', err.message);
+      console.warn('[CameraCapture] getUserMedia falló, usando fallback nativo:', err.message);
       if (isMountedRef.current) {
         setMode('native');
         setIsReady(true);
       }
     }
-  }, [facingMode]);
+  }, [facingMode, stopCurrentStream]);
+
+  // Sincronizar video cuando activeStream cambie
+  useEffect(() => {
+    if (videoRef.current && activeStream) {
+      videoRef.current.srcObject = activeStream;
+      videoRef.current.play().catch(err => {
+        console.warn('[CameraCapture] video play effect error:', err);
+      });
+    }
+  }, [activeStream]);
 
   // ── Lifecycle ──
   useEffect(() => {
@@ -88,21 +139,16 @@ export default function CameraCapture({ isOpen, onClose, onPhotosReady, maxPhoto
     }
     return () => {
       isMountedRef.current = false;
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop());
-        streamRef.current = null;
-      }
+      stopCurrentStream();
     };
-  }, [isOpen]);
+  }, [isOpen, startCamera, stopCurrentStream]);
 
   // ── Cambiar cámara (solo modo stream) ──
   const handleFlipCamera = useCallback(() => {
     const newFacing = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(newFacing);
-    if (mode === 'stream') {
-      startCamera(newFacing);
-    }
-  }, [facingMode, startCamera, mode]);
+    startCamera(newFacing);
+  }, [facingMode, startCamera]);
 
   // ── Captura: getUserMedia ──
   const handleCaptureStream = useCallback(() => {
@@ -123,6 +169,9 @@ export default function CameraCapture({ isOpen, onClose, onPhotosReady, maxPhoto
 
     setLastFlash(true);
     setTimeout(() => setLastFlash(false), 150);
+    try {
+      if (navigator.vibrate) navigator.vibrate(40);
+    } catch (_) {}
 
     canvas.toBlob((blob) => {
       if (!blob) return;
@@ -168,6 +217,25 @@ export default function CameraCapture({ isOpen, onClose, onPhotosReady, maxPhoto
       console.warn('[CameraCapture] Error nativo:', err);
     }
   }, [photos.length, maxPhotos]);
+  // ── Elegir desde galería ──
+  const handlePickFromGallery = useCallback(async () => {
+    try {
+      const remaining = maxPhotos - photos.length;
+      if (remaining <= 0) return;
+      const picked = await pickFromGallery(remaining);
+      if (picked?.length) {
+        setPhotos(prev => [
+          ...prev,
+          ...picked.map((p, idx) => ({
+            ...p,
+            id: `gallery-${Date.now()}-${idx}`,
+          })),
+        ]);
+      }
+    } catch (e) {
+      console.warn('[CameraCapture] Error al seleccionar de galería:', e);
+    }
+  }, [photos.length, maxPhotos]);
 
   // ── Captura dispatch ──
   const handleCapture = useCallback(() => {
@@ -180,47 +248,42 @@ export default function CameraCapture({ isOpen, onClose, onPhotosReady, maxPhoto
 
   // ── Confirmar ──
   const handleDone = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
+    stopCurrentStream();
     if (photos.length > 0 && onPhotosReady) {
       onPhotosReady(photos);
     }
     onClose();
-  }, [photos, onPhotosReady, onClose]);
+  }, [photos, onPhotosReady, onClose, stopCurrentStream]);
 
   // ── Cancelar ──
   const handleCancel = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop());
-      streamRef.current = null;
-    }
+    stopCurrentStream();
     setPhotos([]);
     onClose();
-  }, [onClose]);
+  }, [onClose, stopCurrentStream]);
 
   if (!isOpen) return null;
 
   return (
     <div style={styles.overlay}>
-      {/* Video feed (solo modo stream) */}
-      {mode === 'stream' && (
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          style={{
-            ...styles.video,
-            transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
-          }}
-        />
-      )}
+      {/* Video feed: SIEMPRE en el DOM para que el ref y srcObject existan desde el inicio */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        style={{
+          ...styles.video,
+          opacity: mode === 'stream' ? 1 : 0,
+          transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
+          pointerEvents: 'none',
+          zIndex: 1,
+        }}
+      />
 
       {/* Modo nativo: fondo oscuro con instrucciones */}
       {mode === 'native' && (
-        <div style={styles.nativeBackground}>
+        <div style={{ ...styles.nativeBackground, zIndex: 10 }}>
           <div style={styles.nativeContent}>
             <div style={styles.nativeIconWrap}>
               <Camera size={40} color="#ffffff" strokeWidth={1.5} />
@@ -240,14 +303,33 @@ export default function CameraCapture({ isOpen, onClose, onPhotosReady, maxPhoto
         </div>
       )}
 
-      {/* Loading */}
+      {/* Loading overlay */}
       {mode === 'loading' && (
-        <div style={styles.nativeBackground}>
+        <div style={{ ...styles.nativeBackground, zIndex: 10 }}>
           <div style={styles.nativeContent}>
             <div style={{ ...styles.nativeIconWrap, animation: 'spin 1s linear infinite' }}>
               <Camera size={32} color="#ffffff" strokeWidth={1.5} />
             </div>
             <p style={{ color: '#94a3b8', fontSize: '14px' }}>Iniciando cámara...</p>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('native');
+                setIsReady(true);
+              }}
+              style={{
+                marginTop: '12px',
+                background: 'rgba(255, 255, 255, 0.1)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                color: '#cbd5e1',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                fontSize: '13px',
+                cursor: 'pointer',
+              }}
+            >
+              Usar cámara externa
+            </button>
           </div>
         </div>
       )}
@@ -296,9 +378,20 @@ export default function CameraCapture({ isOpen, onClose, onPhotosReady, maxPhoto
         {photos.length > 0 && (
           <div style={styles.thumbnailStrip} className="no-scrollbar">
             {photos.map((photo, idx) => (
-              <div key={photo.id} style={styles.thumbWrap}>
+              <div key={photo.id || idx} style={styles.thumbWrap}>
                 <img src={photo.url} alt={`Foto ${idx + 1}`} style={styles.thumbImg} />
                 <span style={styles.thumbBadge}>{idx + 1}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPhotos(prev => prev.filter((_, i) => i !== idx));
+                  }}
+                  style={styles.thumbDeleteBtn}
+                  title="Eliminar foto"
+                >
+                  <X size={10} color="#ffffff" strokeWidth={3} />
+                </button>
               </div>
             ))}
           </div>
@@ -306,7 +399,16 @@ export default function CameraCapture({ isOpen, onClose, onPhotosReady, maxPhoto
 
         {/* Controles */}
         <div style={styles.controls}>
-          <div style={styles.sideBtn} />
+          <div style={styles.sideBtn}>
+            <button
+              type="button"
+              onClick={handlePickFromGallery}
+              style={styles.galleryBtn}
+              title="Elegir fotos de la galería"
+            >
+              <Images size={22} color="#ffffff" strokeWidth={2} />
+            </button>
+          </div>
 
           {/* Botón de captura */}
           <button
@@ -339,6 +441,12 @@ export default function CameraCapture({ isOpen, onClose, onPhotosReady, maxPhoto
 const styles = {
   overlay: {
     position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
     inset: 0,
     zIndex: 2000,
     backgroundColor: '#000000',
@@ -348,13 +456,23 @@ const styles = {
   },
   video: {
     position: 'absolute',
-    inset: 0,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     width: '100%',
     height: '100%',
+    inset: 0,
     objectFit: 'cover',
   },
   nativeBackground: {
     position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: '100%',
+    height: '100%',
     inset: 0,
     background: 'linear-gradient(180deg, #0f172a 0%, #1e293b 100%)',
     display: 'flex',
@@ -523,6 +641,22 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
   },
+  thumbDeleteBtn: {
+    position: 'absolute',
+    bottom: '2px',
+    right: '2px',
+    width: '18px',
+    height: '18px',
+    borderRadius: '50%',
+    backgroundColor: 'rgba(239, 68, 68, 0.9)',
+    border: 'none',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: 0,
+    zIndex: 5,
+  },
   controls: {
     display: 'flex',
     alignItems: 'center',
@@ -532,6 +666,22 @@ const styles = {
   sideBtn: {
     width: '56px',
     height: '44px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  galleryBtn: {
+    width: '44px',
+    height: '44px',
+    borderRadius: '50%',
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    border: '1px solid rgba(255, 255, 255, 0.28)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    padding: 0,
+    transition: 'background-color 0.15s ease',
   },
   captureBtn: {
     width: '76px',

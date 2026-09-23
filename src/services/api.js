@@ -1,7 +1,19 @@
+import { Capacitor } from '@capacitor/core';
 import { supabase } from '../lib/supabase';
 
 const rawUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-const API_BASE_URL = String(rawUrl).trim().replace(/\/+$/, '');
+let cleanUrl = String(rawUrl).trim().replace(/\/+$/, '');
+
+// En Android (emulador nativo), localhost apunta al propio teléfono.
+// La PC anfitriona donde corre el backend se accede mediante 10.0.2.2.
+if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+  if (cleanUrl.includes('localhost') || cleanUrl.includes('127.0.0.1')) {
+    cleanUrl = cleanUrl.replace('://localhost', '://10.0.2.2').replace('://127.0.0.1', '://10.0.2.2');
+  }
+}
+
+const API_BASE_URL = cleanUrl;
+console.log('[API] Backend base URL:', API_BASE_URL);
 
 // Función para obtener un token válido (refrescándolo si expiró)
 async function getValidToken() {
@@ -41,10 +53,19 @@ async function request(endpoint, options = {}) {
     ...options.headers,
   };
 
+  let controller = null;
+  let timeoutId = null;
   const config = {
     ...options,
     headers,
   };
+
+  if (!config.signal) {
+    controller = new AbortController();
+    config.signal = controller.signal;
+    const timeoutMs = options.timeout || 60000;
+    timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  }
 
   if (config.body && typeof config.body === 'object' && !isFormData) {
     config.body = JSON.stringify(config.body);
@@ -92,6 +113,8 @@ async function request(endpoint, options = {}) {
   } catch (error) {
     console.warn(`[API ${options.method || 'GET'}] ${endpoint} error de red:`, error.message);
     return { success: false, error: error.message };
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }
 

@@ -170,13 +170,31 @@ class PhotoUploadService {
         }
       }, 150);
 
-      // Enviar solicitud POST al backend
-      const response = await api.post('/api/photos', formData);
+      // Enviar solicitud POST al backend (con hasta 2 intentos automáticos)
+      let response = null;
+      let lastError = null;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          response = await api.post('/api/photos', formData);
+          if (response && response.success !== false) {
+            lastError = null;
+            break;
+          }
+          lastError = new Error(response?.message || response?.error || 'Error en la respuesta del servidor');
+        } catch (postErr) {
+          lastError = postErr;
+        }
+
+        if (attempt < 2) {
+          console.warn(`[photoUploadService] Intento ${attempt} falló para ${photoItem.filename}. Reintentando en 1s...`);
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      }
 
       clearInterval(progressTimer);
 
-      if (!response || response.success === false) {
-        throw new Error(response?.message || response?.error || 'Error desconocido al subir la foto');
+      if (lastError || !response || response.success === false) {
+        throw (lastError || new Error('Error desconocido al subir la foto'));
       }
 
       const uploadedData = response.data || response;
