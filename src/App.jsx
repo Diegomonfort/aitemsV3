@@ -2123,18 +2123,25 @@ export default function App() {
 
     if (cameraContext === 'property') {
       // Flujo: "Subir fotos" a la propiedad
-      const newItems = capturedPhotos.map((photo, idx) => ({
-        id: `pending-cam-${Date.now()}-${idx}`,
-        file: photo.file,
-        name: photo.file.name,
-        title: `Foto ${idx + 1}`,
-        url: photo.url,
-        size: photo.file.size,
-        originalSize: photo.file.size,
-        wasOptimized: false,
-        formattedSize: `${(photo.file.size / 1024).toFixed(0)} KB`,
-        room: newPhotoRoom || 'General',
-      }));
+      const newItems = capturedPhotos.map((photo, idx) => {
+        const sizeInBytes = photo.file.size;
+        const formattedSize = sizeInBytes >= 1024 * 1024
+          ? `${(sizeInBytes / (1024 * 1024)).toFixed(2)} MB`
+          : `${Math.round(sizeInBytes / 1024)} KB`;
+
+        return {
+          id: `pending-cam-${Date.now()}-${idx}`,
+          file: photo.file,
+          name: photo.file.name,
+          title: `Foto ${idx + 1}`,
+          url: photo.url,
+          size: sizeInBytes,
+          originalSize: sizeInBytes,
+          wasOptimized: true,
+          formattedSize,
+          room: newPhotoRoom || 'General',
+        };
+      });
       setSelectedNewPhotos(prev => [...prev, ...newItems]);
       toast.success(`${capturedPhotos.length} foto${capturedPhotos.length > 1 ? 's' : ''} agregada${capturedPhotos.length > 1 ? 's' : ''}`);
     } else if (cameraContext === 'room') {

@@ -3,14 +3,67 @@ import { X, Camera, RotateCw, Check, Images } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { pickFromGallery } from '../utils/nativeCamera';
+import { openNativeMultiCamera, isMultiCameraAvailable } from '../utils/multiCamera';
 
 /**
  * CameraCapture — Cámara fullscreen in-app para captura múltiple rápida.
  * 
- * Abre un visor en vivo de video fullscreen. Cada toque captura una foto
- * instantánea y la acumula en la bandeja inferior sin cerrar la cámara.
+ * En iOS nativo, delega al plugin Swift MultiCamera que ofrece:
+ * - Zoom 0.5x / 1x / 2x con lentes reales
+ * - Orientación correcta al girar el teléfono
+ * - Captura multi-foto sin cerrar la cámara
+ * 
+ * En web/Android, usa getUserMedia como fallback.
  */
 export default function CameraCapture({ isOpen, onClose, onPhotosReady, maxPhotos = 20 }) {
+  const nativeCameraLaunched = useRef(false);
+  const [useWebFallback, setUseWebFallback] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setUseWebFallback(false);
+    }
+  }, [isOpen]);
+
+  // ── iOS nativo: usar plugin Swift directamente ──
+  useEffect(() => {
+    if (!isOpen || !isMultiCameraAvailable() || useWebFallback || nativeCameraLaunched.current) return;
+    nativeCameraLaunched.current = true;
+
+    (async () => {
+      try {
+        const photos = await openNativeMultiCamera(maxPhotos);
+        if (photos?.length > 0 && onPhotosReady) {
+          onPhotosReady(photos.map((p, idx) => ({
+            url: p.url,
+            file: p.file,
+            id: `native-cam-${Date.now()}-${idx}`,
+          })));
+        }
+        onClose();
+      } catch (err) {
+        console.warn('[CameraCapture] Native camera error:', err);
+        // Si el plugin nativo da error (ej. binario viejo sin compilar), caer al fallback web
+        setUseWebFallback(true);
+      } finally {
+        nativeCameraLaunched.current = false;
+      }
+    })();
+  }, [isOpen, maxPhotos, onPhotosReady, onClose, useWebFallback]);
+
+  // Si estamos en iOS nativo y no se activó el fallback, no renderizar la UI web
+  if (isMultiCameraAvailable() && !useWebFallback) {
+    return null;
+  }
+
+  // ── Fallback: Web/Android con getUserMedia ──
+  return <CameraCaptureWeb isOpen={isOpen} onClose={onClose} onPhotosReady={onPhotosReady} maxPhotos={maxPhotos} />;
+}
+
+/**
+ * CameraCaptureWeb — Fallback con getUserMedia para web/Android.
+ */
+function CameraCaptureWeb({ isOpen, onClose, onPhotosReady, maxPhotos = 20 }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);

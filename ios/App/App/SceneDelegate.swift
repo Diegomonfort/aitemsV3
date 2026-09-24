@@ -9,8 +9,16 @@ class PullToRefreshViewController: CAPBridgeViewController, WKScriptMessageHandl
     private var audioRecorder: AVAudioRecorder?
     private var audioFileURL: URL?
 
+    override func capacitorDidLoad() {
+        super.capacitorDidLoad()
+        bridge?.registerPluginInstance(MultiCameraPlugin())
+        print("📸 [MultiCameraPlugin] Registered in capacitorDidLoad")
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
+        bridge?.registerPluginInstance(MultiCameraPlugin())
+        print("📸 [MultiCameraPlugin] Registered in viewDidLoad")
 
         // Spinner negro sobre fondo blanco
         refreshControl.tintColor = UIColor.black
