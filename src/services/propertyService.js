@@ -80,4 +80,11 @@ export const propertyService = {
   async updateProperty(propertyId, updates) {
     return await api.put(`/api/properties/${propertyId}`, updates);
   },
+
+  /**
+   * Crea lote de ítems para una propiedad y ambiente (fotos o bulk)
+   */
+  async createItemsBatch(propertyId, payload) {
+    return await api.post(`/api/properties/${propertyId}/items/batch`, payload);
+  },
 };

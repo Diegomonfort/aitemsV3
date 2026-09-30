@@ -2348,17 +2348,18 @@ export default function App() {
           user_id: authUser?.id || selectedPropertyDetail.userId || 'anonymous',
           property_id: selectedPropertyDetail.id,
           category_id: categoryId,
+          category_name: selectedRoomDetail,
+          ambiente: selectedRoomDetail,
+          source: 'photo',
           items: confirmed.map(c => ({
             name: c.name.trim(),
             quantity: c.quantity || 1,
             description: c.description || null,
             status: c.status || null
-          })),
-          transcription: `Análisis de ${photoItemFiles.length} foto(s) con IA`,
-          duration: 0
+          }))
         };
 
-        const res = await voiceService.confirmVoiceItems(payload);
+        const res = await propertyService.createItemsBatch(selectedPropertyDetail.id, payload);
         if (res.success && (res.data?.items || res.items || res.data?.data?.items)) {
           createdItems = res.data?.items || res.items || res.data?.data?.items || [];
         }
