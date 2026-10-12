@@ -47,7 +47,8 @@ import {
   ArrowUp,
   Loader2,
   Users,
-  MoreVertical
+  MoreVertical,
+  History
 } from 'lucide-react';
 import logo from './assets/logo-color.png';
 import placeholderVertical from './assets/placeholderVertical.webp';
@@ -59,6 +60,7 @@ import OwnerDashboard from './components/OwnerDashboard';
 import SharePropertyModal from './components/SharePropertyModal';
 import CreatePropertyModal from './components/CreatePropertyModal';
 import EditPropertyModal from './components/EditPropertyModal';
+import PropertyLogsModal from './components/PropertyLogsModal';
 import LoginScreen from './components/auth/LoginScreen';
 import VerifyEmailScreen from './components/auth/VerifyEmailScreen';
 import CreateInmobiliariaScreen from './components/auth/CreateInmobiliariaScreen';
@@ -77,11 +79,24 @@ import { isNativePlatform, takeMultiplePhotos, pickFromGallery } from './utils/n
 import CameraCapture from './components/CameraCapture';
 import { useToast } from './context/ToastContext';
 
+const getPropRoomsCount = (prop) => {
+  if (!prop) return 0;
+  if (typeof prop.roomsCount === 'number' && prop.roomsCount >= 0) return prop.roomsCount;
+  if (typeof prop.ambientes === 'number' && prop.ambientes >= 0) return prop.ambientes;
+  if (Array.isArray(prop.ambientes)) return prop.ambientes.length;
+  if (Array.isArray(prop.categories)) return prop.categories.length;
+  if (Array.isArray(prop.rooms)) return prop.rooms.length;
+  return 0;
+};
+
 const getPropertyInventory = (prop) => {
   if (!prop) return {};
   if (prop.inventory !== undefined && prop.inventory !== null) return prop.inventory;
   const inv = {};
-  const rooms = (prop && prop.rooms) || [];
+  const rawRooms = (prop && prop.rooms && prop.rooms.length > 0)
+    ? prop.rooms
+    : (prop && prop.ambientes ? prop.ambientes : []);
+  const rooms = rawRooms.map(r => typeof r === 'string' ? r : (r?.name || 'Ambiente'));
   rooms.forEach((room) => {
     inv[room] = [];
   });
@@ -171,7 +186,7 @@ const getPropertyPhotos = (prop) => {
 const PropertyCardItem = React.memo(({ item, onOpen, placeholder, styles }) => {
   const hasPhoto = Boolean(item.image || item.image_url);
   const photoSrc = hasPhoto ? (item.image || item.image_url) : placeholder;
-  const roomCount = item.rooms?.length || item.ambientes || 0;
+  const roomCount = getPropRoomsCount(item);
   const title = item.name || item.title || 'Propiedad';
   const address = item.address || item.location || '';
   const isShared = Boolean(item.isShared || item.is_shared);
@@ -383,20 +398,21 @@ export default function App() {
 
   // Datos de la Inmobiliaria (Owner)
   const [agency, setAgency] = useState({
-    name: 'Horizonte Propiedades',
-    location: 'Montevideo, Uruguay',
+    id: null,
+    name: '',
+    location: '',
     website: '',
     logo: null,
   });
 
   // Datos del Plan (Owner)
   const [plan, setPlan] = useState({
-    name: 'Plan Pro Inmobiliaria',
+    name: 'Plan Free',
     status: 'active',
-    renewalDate: '15 de Octubre, 2026',
+    renewalDate: 'Sin vencimiento',
     propertiesUsed: 0,
-    propertiesLimit: 50,
-    agentsLimit: 10,
+    propertiesLimit: 10,
+    agentsLimit: 1,
   });
 
   // Lista de Agentes del equipo (Owner)
@@ -450,11 +466,16 @@ export default function App() {
     setAgents(prev => [newAgent, ...prev]);
   };
 
-  const handleRemoveAgent = (agentId) => {
+  const handleRemoveAgent = async (agentId) => {
     setAgents(prev => prev.filter(a => a.id !== agentId));
+    try {
+      await agencyService.cancelInvitation(agentId);
+    } catch (err) {
+      // Silencioso si no es invitación pendiente
+    }
   };
 
-  const handleResendInvite = (agentId) => {
+  const handleResendInvite = async (agentId) => {
     // Confirmación visual
   };
 
@@ -463,17 +484,31 @@ export default function App() {
     if (!authLoading) {
       if (authUser) {
         setCurrentUser(authUser);
-        setUserRole(authUser.role || 'owner');
-        if (authView === 'login') {
-          setAuthView('app');
+        setUserRole(authUser.role || authUser.type || 'owner');
+
+        const isOwner = authUser.type === 'owner' || authUser.role === 'owner' || !authUser.type;
+        const needsAgency = isOwner && !authUser.inmobiliaria_id && !authAgency?.id;
+
+        if (needsAgency) {
+          setPendingRegisterData(prev => prev || {
+            agencyName: `${authUser.name || 'Mi'} Propiedades`,
+            country: authUser.country || 'Uruguay',
+            state: authUser.state || '',
+            city: authUser.city || 'Montevideo',
+          });
+          setAuthView('create-inmobiliaria');
+        } else {
+          if (authView === 'login' || (authView === 'create-inmobiliaria' && !needsAgency)) {
+            setAuthView('app');
+          }
         }
       } else {
-        if (authView === 'app') {
+        if (authView !== 'login') {
           setAuthView('login');
         }
       }
     }
-  }, [authUser, authLoading]);
+  }, [authUser, authAgency, authLoading]);
 
   // Sincronizar datos de la inmobiliaria
   useEffect(() => {
@@ -534,32 +569,100 @@ export default function App() {
     }
   }, [isAuthenticated]);
 
+  // Cargar información real de la inmobiliaria y su plan desde el backend
+  const loadAgencyInfo = useCallback(async () => {
+    if (!isAuthenticated) return;
+    try {
+      const res = await agencyService.getAgencyInfo();
+      if (res?.success && res.inmobiliaria) {
+        const inmo = res.inmobiliaria;
+        setAgency(prev => ({
+          ...prev,
+          id: inmo.id,
+          name: inmo.name || prev.name,
+          location: [inmo.city, inmo.country].filter(Boolean).join(', '),
+          website: inmo.website_url || inmo.website || prev.website,
+          logo: inmo.logo || prev.logo,
+          country: inmo.country || prev.country,
+          state: inmo.state || prev.state,
+          city: inmo.city || prev.city,
+        }));
+
+        if (inmo.plan) {
+          const planData = inmo.plan;
+          let renewalFormatted = 'Sin vencimiento';
+          if (planData.endsAt) {
+            try {
+              const d = new Date(planData.endsAt);
+              if (!isNaN(d.getTime())) {
+                renewalFormatted = d.toLocaleDateString('es-ES', {
+                  day: 'numeric',
+                  month: 'long',
+                  year: 'numeric',
+                });
+              }
+            } catch (e) {
+              renewalFormatted = planData.endsAt;
+            }
+          }
+          setPlan({
+            name: planData.name || 'Plan Free',
+            status: planData.status || 'active',
+            renewalDate: renewalFormatted,
+            propertiesUsed: inmo.stats?.totalProperties ?? planData.propertiesCount ?? 0,
+            propertiesLimit: planData.propertiesMax || 10,
+            agentsLimit: planData.agentsMax || 1,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Error cargando información de inmobiliaria:', err);
+    }
+  }, [isAuthenticated]);
+
   useEffect(() => {
     loadProperties();
     loadColleagues();
-  }, [loadProperties, loadColleagues]);
+    loadAgencyInfo();
+  }, [loadProperties, loadColleagues, loadAgencyInfo]);
 
   // Registrar handler para pull-to-refresh nativo de iOS
   useEffect(() => {
     window.onNativePullToRefresh = () => {
       loadProperties();
       loadColleagues();
+      loadAgencyInfo();
     };
     return () => {
       delete window.onNativePullToRefresh;
     };
-  }, [loadProperties, loadColleagues]);
+  }, [loadProperties, loadColleagues, loadAgencyInfo]);
 
 
   const handleLogin = (userData) => {
     setCurrentUser(userData);
-    setUserRole(userData.role || 'owner');
-    setAuthView('app');
-    setActiveTab('home');
-    setHasInitialPropertiesLoaded(false);
-    refreshProfile?.();
-    loadProperties();
-    loadColleagues();
+    setUserRole(userData.role || userData.type || 'owner');
+
+    const isOwner = userData.role === 'owner' || userData.type === 'owner' || !userData.role;
+    const needsAgency = isOwner && !userData.inmobiliaria_id && !authAgency?.id;
+
+    if (needsAgency) {
+      setPendingRegisterData({
+        agencyName: `${userData.name || 'Mi'} Propiedades`,
+        country: userData.country || 'Uruguay',
+        state: userData.state || '',
+        city: userData.city || 'Montevideo',
+      });
+      setAuthView('create-inmobiliaria');
+    } else {
+      setAuthView('app');
+      setActiveTab('home');
+      setHasInitialPropertiesLoaded(false);
+      refreshProfile?.();
+      loadProperties();
+      loadColleagues();
+      loadAgencyInfo();
+    }
   };
 
   const handleRegisterSuccess = (userData) => {
@@ -574,16 +677,30 @@ export default function App() {
     setAuthView('verify-email');
   };
 
-  const handleCompleteInmobiliaria = (agencyData) => {
+  const handleCompleteInmobiliaria = async (agencyData) => {
     setAgency(prev => ({
       ...prev,
+      id: agencyData.id,
       name: agencyData.name,
       location: agencyData.location,
       website: agencyData.website,
       logo: agencyData.logo || prev.logo,
+      country: agencyData.country,
+      city: agencyData.city,
     }));
-    refreshProfile?.();
+    setCurrentUser(prev => ({
+      ...prev,
+      inmobiliaria_id: agencyData.id,
+    }));
+    try {
+      await refreshProfile?.();
+    } catch (e) {
+      console.warn('Aviso refrescando perfil tras crear inmobiliaria:', e);
+    }
     loadProperties();
+    loadColleagues();
+    loadAgencyInfo();
+    setActiveTab('home');
     setAuthView('app');
   };
 
@@ -618,6 +735,8 @@ export default function App() {
   const [selectedProperty, setSelectedProperty] = useState(null);
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [customRoomInput, setCustomRoomInput] = useState('');
+  const [customRoomType, setCustomRoomType] = useState('habitacion');
+  const [isCreatingQuickRoom, setIsCreatingQuickRoom] = useState(false);
   const [isAddingCustomRoom, setIsAddingCustomRoom] = useState(false);
   const [isDirectRoomAction, setIsDirectRoomAction] = useState(false);
 
@@ -766,7 +885,21 @@ export default function App() {
   const [isPropertyOptionsMenuOpen, setIsPropertyOptionsMenuOpen] = useState(false);
   const [isDeletePropertyModalOpen, setIsDeletePropertyModalOpen] = useState(false);
   const [isEditPropertyModalOpen, setIsEditPropertyModalOpen] = useState(false);
+  const [isPropertyLogsModalOpen, setIsPropertyLogsModalOpen] = useState(false);
   const [isDeletingProperty, setIsDeletingProperty] = useState(false);
+  // Estado para confirmar eliminación de ítems
+  const [itemToDelete, setItemToDelete] = useState(null); // { item, roomName }
+  const [isDeletingItem, setIsDeletingItem] = useState(false);
+  // Estado para confirmar eliminación de ambientes
+  const [roomToDelete, setRoomToDelete] = useState(null); // roomName string
+  const [isDeletingRoom, setIsDeletingRoom] = useState(false);
+  const [openItemMenuId, setOpenItemMenuId] = useState(null); // ID del ítem cuyo menú 3-dots está abierto
+  const [isRoomMenuOpen, setIsRoomMenuOpen] = useState(false); // Menú 3-dots del ambiente actual
+  // Estado para editar ambiente
+  const [isEditRoomModalOpen, setIsEditRoomModalOpen] = useState(false);
+  const [editRoomName, setEditRoomName] = useState('');
+  const [editRoomOriginalName, setEditRoomOriginalName] = useState('');
+  const [isSavingRoomEdit, setIsSavingRoomEdit] = useState(false);
   const showToast = (msg, type = 'success') => {
     if (type === 'error') toast.error(msg);
     else if (type === 'warning') toast.warning(msg);
@@ -794,8 +927,12 @@ export default function App() {
             inventory: freshProp.inventory || getPropertyInventory(freshProp),
             photos: freshProp.photos || getPropertyPhotos(freshProp),
             ambientes: freshProp.ambientes || [],
-            rooms: freshProp.rooms || [],
+            rooms: (freshProp.rooms && freshProp.rooms.length > 0)
+              ? freshProp.rooms.map(r => typeof r === 'string' ? r : (r?.name || 'Ambiente'))
+              : (freshProp.ambientes ? freshProp.ambientes.map(a => typeof a === 'string' ? a : (a?.name || 'Ambiente')) : []),
             floorPlan: freshProp.floorPlan !== undefined ? freshProp.floorPlan : null,
+            pdf: freshProp.pdf || null,
+            hasPdf: Boolean(freshProp.hasPdf || freshProp.pdf?.pdf_url),
           };
           setSelectedPropertyDetail(propWithInv);
           try {
@@ -1138,7 +1275,7 @@ export default function App() {
       );
       const categoryId = matchedAmb?.id || selectedRoom || 'general';
 
-      const fileExt = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('aac') ? 'aac' : 'webm';
+      const fileExt = (mimeType.includes('m4a') || mimeType.includes('mp4') || mimeType.includes('aac')) ? 'm4a' : 'webm';
       const formData = new FormData();
       formData.append('audio', audioBlob, `item_${Date.now()}.${fileExt}`);
       formData.append('user_id', authUser?.id || activeProp?.userId || 'anonymous');
@@ -1220,10 +1357,32 @@ export default function App() {
     const room = selectedRoom;
 
     try {
-      const matchedAmb = (activeProp?.ambientes || []).find(
+      let matchedAmb = (activeProp?.ambientes || []).find(
         a => a.name?.toLowerCase().trim() === room?.toLowerCase().trim()
       );
-      const categoryId = matchedAmb?.id;
+      let categoryId = matchedAmb?.id;
+
+      // Garantizar que la categoría exista en la base de datos para no perder los ítems
+      if (!categoryId && activeProp?.id && room) {
+        try {
+          const resCat = await propertyService.createCategory({
+            propertyId: activeProp.id,
+            name: room,
+            type: 'habitacion',
+          });
+          if (resCat?.success && (resCat.category || resCat.data)) {
+            const cat = resCat.category || resCat.data;
+            categoryId = cat.id;
+            const updatedAmbs = [...(activeProp.ambientes || []), cat];
+            activeProp.ambientes = updatedAmbs;
+            if (activeProp.rooms && !activeProp.rooms.includes(room)) {
+              activeProp.rooms.push(room);
+            }
+          }
+        } catch (catErr) {
+          console.warn('[handleConfirmVoiceItems] Error creando categoría al vuelo:', catErr);
+        }
+      }
 
       let createdItems = [];
       if (categoryId) {
@@ -1327,8 +1486,12 @@ export default function App() {
             ...freshProp,
             inventory: freshProp.inventory || prev.inventory || {},
             ambientes: freshProp.ambientes || prev.ambientes || [],
-            rooms: freshProp.rooms || prev.rooms || [],
+            rooms: (freshProp.rooms && freshProp.rooms.length > 0)
+              ? freshProp.rooms.map(r => typeof r === 'string' ? r : (r?.name || 'Ambiente'))
+              : (freshProp.ambientes ? freshProp.ambientes.map(a => typeof a === 'string' ? a : (a?.name || 'Ambiente')) : (prev.rooms || [])),
             floorPlan: freshProp.floorPlan !== undefined ? freshProp.floorPlan : (prev.floorPlan || null),
+            pdf: freshProp.pdf || prev.pdf || null,
+            hasPdf: Boolean(freshProp.hasPdf || freshProp.pdf?.pdf_url || prev.hasPdf),
           };
         });
         setProperties(prev => prev.map(p => p.id === prop.id ? { ...p, ...freshProp } : p));
@@ -1574,6 +1737,17 @@ export default function App() {
 
   const handleConfirmDeleteProperty = async () => {
     if (!selectedPropertyDetail) return;
+    const isShared = Boolean(
+      selectedPropertyDetail.isShared || 
+      selectedPropertyDetail.is_shared || 
+      (currentUserId && selectedPropertyDetail.userId && String(selectedPropertyDetail.userId) !== String(currentUserId)) ||
+      (currentUserId && selectedPropertyDetail.user_id && String(selectedPropertyDetail.user_id) !== String(currentUserId))
+    );
+    if (isShared) {
+      toast.error('No puedes eliminar una propiedad compartida');
+      setIsDeletePropertyModalOpen(false);
+      return;
+    }
     const propId = selectedPropertyDetail.id;
     setIsDeletingProperty(true);
     try {
@@ -1607,14 +1781,21 @@ export default function App() {
     setExtractedItems([]);
   };
 
-  const handleSaveNewItem = (roomName) => {
+  const handleSaveNewItem = async (roomName) => {
     if (!newItemName.trim() || !selectedPropertyDetail) return;
+    const itemName = capitalizeFirst(newItemName);
+    const itemQty = Math.max(1, parseInt(newItemQty) || 1);
+    const itemDesc = capitalizeFirst(newItemDesc);
+    const itemStatus = newItemStatus ? newItemStatus.trim() : null;
+
+    // Optimistic local UI update with temp ID
+    const tempId = Date.now();
     const newItem = {
-      id: Date.now(),
-      name: capitalizeFirst(newItemName),
-      quantity: Math.max(1, parseInt(newItemQty) || 1),
-      description: capitalizeFirst(newItemDesc),
-      status: newItemStatus ? newItemStatus.trim() : null,
+      id: tempId,
+      name: itemName,
+      quantity: itemQty,
+      description: itemDesc,
+      status: itemStatus,
     };
 
     const currentInv = selectedPropertyDetail.inventory || getPropertyInventory(selectedPropertyDetail);
@@ -1634,6 +1815,41 @@ export default function App() {
     setNewItemDesc('');
     setNewItemStatus('');
     setIsAddingItemRoom(null);
+
+    // Persist to backend (async, non-blocking for UX)
+    try {
+      const matchedAmb = (selectedPropertyDetail.ambientes || []).find(
+        a => a.name?.toLowerCase().trim() === roomName?.toLowerCase().trim()
+      );
+      const catId = matchedAmb?.id || null;
+
+      const res = await propertyService.createItem({
+        name: itemName,
+        quantity: itemQty,
+        description: itemDesc,
+        status: itemStatus,
+        cat_id: catId,
+        property_id: selectedPropertyDetail.id,
+        user_id: authUser?.id,
+      });
+
+      // Replace temp ID with real DB ID
+      if (res?.success) {
+        const realItem = res.item || res.data;
+        if (realItem?.id) {
+          setSelectedPropertyDetail(prev => {
+            if (!prev) return prev;
+            const inv = prev.inventory || {};
+            const items = (inv[roomName] || []).map(it =>
+              it.id === tempId ? { ...it, id: realItem.id, cat_id: realItem.cat_id } : it
+            );
+            return { ...prev, inventory: { ...inv, [roomName]: items } };
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[handleSaveNewItem] Backend sync error:', err);
+    }
   };
 
   const handleStartDetailEdit = (item) => {
@@ -1646,18 +1862,24 @@ export default function App() {
     });
   };
 
-  const handleSaveDetailEdit = (roomName) => {
+  const handleSaveDetailEdit = async (roomName) => {
     if (!detailEditForm.name.trim() || !selectedPropertyDetail) return;
+    const editedItemId = detailEditingItemId;
+    const updatedName = capitalizeFirst(detailEditForm.name);
+    const updatedQty = Math.max(1, parseInt(detailEditForm.quantity) || 1);
+    const updatedDesc = capitalizeFirst(detailEditForm.description);
+    const updatedStatus = detailEditForm.status ? detailEditForm.status.trim() : null;
+
     const currentInv = selectedPropertyDetail.inventory || getPropertyInventory(selectedPropertyDetail);
     const roomItems = currentInv[roomName] || [];
     const updatedRoomItems = roomItems.map(item => {
-      if (item.id === detailEditingItemId) {
+      if (item.id === editedItemId) {
         return {
           ...item,
-          name: capitalizeFirst(detailEditForm.name),
-          quantity: Math.max(1, parseInt(detailEditForm.quantity) || 1),
-          description: capitalizeFirst(detailEditForm.description),
-          status: detailEditForm.status ? detailEditForm.status.trim() : null,
+          name: updatedName,
+          quantity: updatedQty,
+          description: updatedDesc,
+          status: updatedStatus,
         };
       }
       return item;
@@ -1671,21 +1893,223 @@ export default function App() {
     setSelectedPropertyDetail(updatedProp);
     setProperties(prev => prev.map(p => p.id === updatedProp.id ? updatedProp : p));
     setDetailEditingItemId(null);
+
+    // Persist to backend (async, non-blocking)
+    try {
+      // Only call backend for real DB items (not temp local-only items)
+      const isRealDbId = editedItemId && !String(editedItemId).startsWith('local-');
+      if (isRealDbId) {
+        await propertyService.updateItem(editedItemId, {
+          name: updatedName,
+          quantity: updatedQty,
+          description: updatedDesc,
+          status: updatedStatus,
+        });
+      }
+    } catch (err) {
+      console.warn('[handleSaveDetailEdit] Backend sync error:', err);
+    }
   };
 
-  const handleDeleteDetailItem = (roomName, itemId) => {
-    if (!selectedPropertyDetail) return;
-    const currentInv = selectedPropertyDetail.inventory || getPropertyInventory(selectedPropertyDetail);
-    const roomItems = currentInv[roomName] || [];
-    const updatedRoomItems = roomItems.filter(item => item.id !== itemId);
-    const updatedInv = {
-      ...currentInv,
-      [roomName]: updatedRoomItems
-    };
-    const updatedProp = { ...selectedPropertyDetail, inventory: updatedInv };
+  const handleDeleteDetailItem = (roomName, item) => {
+    // Show confirmation modal instead of deleting immediately
+    setItemToDelete({ item, roomName });
+  };
 
-    setSelectedPropertyDetail(updatedProp);
-    setProperties(prev => prev.map(p => p.id === updatedProp.id ? updatedProp : p));
+  const handleConfirmDeleteItem = async () => {
+    if (!itemToDelete || !selectedPropertyDetail) return;
+    const { item, roomName } = itemToDelete;
+    setIsDeletingItem(true);
+
+    try {
+      const currentInv = selectedPropertyDetail.inventory || getPropertyInventory(selectedPropertyDetail);
+      const roomItems = currentInv[roomName] || [];
+      const updatedRoomItems = roomItems.filter(it => String(it.id) !== String(item.id));
+      const updatedInv = {
+        ...currentInv,
+        [roomName]: updatedRoomItems
+      };
+      const updatedProp = { ...selectedPropertyDetail, inventory: updatedInv };
+
+      setSelectedPropertyDetail(updatedProp);
+      setProperties(prev => prev.map(p => p.id === updatedProp.id ? updatedProp : p));
+      toast.success(`Ítem "${item.name}" eliminado correctamente`);
+
+      // Persist to backend (any real DB item, not temp local-only)
+      const isRealDbId = item.id && !String(item.id).startsWith('local-');
+      if (isRealDbId) {
+        await propertyService.deleteItem(item.id);
+      }
+    } catch (err) {
+      console.warn('[handleConfirmDeleteItem] Backend sync error:', err);
+      toast.error('No se pudo eliminar el ítem');
+    } finally {
+      setIsDeletingItem(false);
+      setItemToDelete(null);
+    }
+  };
+
+  const handleConfirmDeleteRoom = async () => {
+    if (!roomToDelete || !selectedPropertyDetail) return;
+    const roomName = roomToDelete;
+    setIsDeletingRoom(true);
+
+    try {
+      // Find the category ID for this room
+      const matchedAmb = (selectedPropertyDetail.ambientes || []).find(
+        a => (typeof a === 'string' ? a : a.name)?.trim().toLowerCase() === roomName.trim().toLowerCase()
+      );
+      const catId = matchedAmb?.id || null;
+
+      // Update local state
+      const currentInv = selectedPropertyDetail.inventory || getPropertyInventory(selectedPropertyDetail) || {};
+      const updatedInv = { ...currentInv };
+      delete updatedInv[roomName];
+
+      const updatedRooms = (selectedPropertyDetail.rooms || []).filter(
+        r => r?.trim().toLowerCase() !== roomName.trim().toLowerCase()
+      );
+      const updatedAmbientes = (selectedPropertyDetail.ambientes || []).filter(
+        a => (typeof a === 'string' ? a : a.name)?.trim().toLowerCase() !== roomName.trim().toLowerCase()
+      );
+
+      const updatedProp = {
+        ...selectedPropertyDetail,
+        inventory: updatedInv,
+        rooms: updatedRooms,
+        ambientes: updatedAmbientes,
+      };
+
+      setSelectedPropertyDetail(updatedProp);
+      setProperties(prev => prev.map(p => p.id === updatedProp.id ? updatedProp : p));
+
+      // If the deleted room was selected, go back
+      if (selectedRoomDetail === roomName) {
+        setSelectedRoomDetail(null);
+      }
+
+      // Clean floor plan shapes that referenced this room
+      try {
+        const fp = updatedProp.floorPlan;
+        if (fp && Array.isArray(fp.shapes)) {
+          const lowerName = roomName.trim().toLowerCase();
+          let changed = false;
+          const cleanShape = (s) => {
+            if (s.ambienteId && s.ambienteId.trim().toLowerCase() === lowerName) {
+              changed = true;
+              return { ...s, ambienteId: null, label: 'Sin ambiente' };
+            }
+            return s;
+          };
+          const cleanedShapes = fp.shapes.map(s => {
+            if (s.isFloor && Array.isArray(s.shapes)) {
+              return { ...s, shapes: s.shapes.map(cleanShape) };
+            }
+            return cleanShape(s);
+          });
+          if (changed) {
+            const cleanedFp = { ...fp, shapes: cleanedShapes };
+            const fpUpdatedProp = { ...updatedProp, floorPlan: cleanedFp };
+            setSelectedPropertyDetail(fpUpdatedProp);
+            setProperties(prev => prev.map(p => p.id === fpUpdatedProp.id ? fpUpdatedProp : p));
+          }
+        }
+      } catch (_) {}
+
+      toast.success(`Ambiente "${roomName}" eliminado correctamente`);
+
+      // Persist to backend
+      const propId = selectedPropertyDetail.id;
+      const res = await propertyService.deleteCategory(propId, catId, roomName);
+      if (!res?.success) {
+        console.warn('[handleConfirmDeleteRoom] Backend response:', res);
+      }
+    } catch (err) {
+      console.warn('[handleConfirmDeleteRoom] Backend sync error:', err);
+      toast.error('No se pudo eliminar el ambiente');
+    } finally {
+      setIsDeletingRoom(false);
+      setRoomToDelete(null);
+    }
+  };
+
+  const handleOpenEditRoom = (roomName) => {
+    setEditRoomOriginalName(roomName);
+    setEditRoomName(roomName);
+    setIsEditRoomModalOpen(true);
+  };
+
+  const handleSaveEditedRoom = async () => {
+    const newName = editRoomName.trim();
+    const oldName = editRoomOriginalName.trim();
+    if (!newName || !selectedPropertyDetail) return;
+    if (newName === oldName) {
+      setIsEditRoomModalOpen(false);
+      return;
+    }
+
+    // Check duplicate
+    const currentRooms = selectedPropertyDetail.rooms || [];
+    if (currentRooms.some(r => r.toLowerCase() === newName.toLowerCase())) {
+      toast.warning(`Ya existe un ambiente llamado "${newName}"`);
+      return;
+    }
+
+    setIsSavingRoomEdit(true);
+    try {
+      // Find category ID
+      const matchedAmb = (selectedPropertyDetail.ambientes || []).find(
+        a => (typeof a === 'string' ? a : a.name)?.trim().toLowerCase() === oldName.toLowerCase()
+      );
+      const catId = matchedAmb?.id || null;
+
+      // Optimistic local update
+      const currentInv = selectedPropertyDetail.inventory || getPropertyInventory(selectedPropertyDetail) || {};
+      const updatedInv = { ...currentInv };
+      const items = updatedInv[oldName] || [];
+      delete updatedInv[oldName];
+      updatedInv[newName] = items;
+
+      const updatedRooms = currentRooms.map(r =>
+        r.trim().toLowerCase() === oldName.toLowerCase() ? newName : r
+      );
+      const updatedAmbientes = (selectedPropertyDetail.ambientes || []).map(a => {
+        const aName = typeof a === 'string' ? a : a.name;
+        if (aName?.trim().toLowerCase() === oldName.toLowerCase()) {
+          return typeof a === 'string' ? newName : { ...a, name: newName };
+        }
+        return a;
+      });
+
+      const updatedProp = {
+        ...selectedPropertyDetail,
+        inventory: updatedInv,
+        rooms: updatedRooms,
+        ambientes: updatedAmbientes,
+      };
+
+      setSelectedPropertyDetail(updatedProp);
+      setProperties(prev => prev.map(p => p.id === updatedProp.id ? updatedProp : p));
+
+      if (selectedRoomDetail === oldName) {
+        setSelectedRoomDetail(newName);
+      }
+
+      setIsEditRoomModalOpen(false);
+      toast.success(`Ambiente renombrado a "${newName}"`);
+
+      // Persist to backend
+      const propId = selectedPropertyDetail.id;
+      await propertyService.updateCategory(propId, catId, {
+        name: newName,
+        oldName: oldName,
+      });
+    } catch (err) {
+      console.warn('[handleSaveEditedRoom] Error:', err);
+      toast.error('No se pudo renombrar el ambiente');
+    } finally {
+      setIsSavingRoomEdit(false);
+    }
   };
 
   const handleOpenAddRoomModal = () => {
@@ -1725,7 +2149,7 @@ export default function App() {
         throw new Error('No se encontró el ID de la propiedad.');
       }
 
-      const fileExt = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('aac') ? 'aac' : 'webm';
+      const fileExt = (mimeType.includes('m4a') || mimeType.includes('mp4') || mimeType.includes('aac')) ? 'm4a' : 'webm';
       const formData = new FormData();
       formData.append('audio', audioBlob, `ambient_${Date.now()}.${fileExt}`);
       formData.append('user_id', authUser?.id || selectedPropertyDetail?.userId || 'anonymous');
@@ -1844,7 +2268,7 @@ export default function App() {
     }
   };
 
-  const handleAddRoomToPropertyDetail = (e, nameOverride) => {
+  const handleAddRoomToPropertyDetail = async (e, nameOverride) => {
     if (e && e.preventDefault) e.preventDefault();
     const rawInput = (nameOverride || newDetailRoomName).trim();
     if (!rawInput || !selectedPropertyDetail) return;
@@ -1880,6 +2304,39 @@ export default function App() {
     toast.success(newNames.length === 1 ? `Ambiente ${newNames[0]} creado exitosamente` : `${newNames.length} ambientes creados exitosamente`);
     if (newNames.length === 1) {
       setActiveRoomFilter(newNames[0]);
+    }
+
+    // Persist to backend (async, non-blocking)
+    try {
+      const propId = selectedPropertyDetail.id;
+      if (newNames.length === 1) {
+        const res = await propertyService.createCategory({ propertyId: propId, name: newNames[0] });
+        if (res?.success) {
+          const cat = res.category || res.data;
+          if (cat?.id) {
+            setSelectedPropertyDetail(prev => {
+              if (!prev) return prev;
+              const currentAmbientes = prev.ambientes || [];
+              return { ...prev, ambientes: [...currentAmbientes, cat] };
+            });
+          }
+        }
+      } else {
+        const ambients = newNames.map(name => ({ name, type: 'habitacion' }));
+        const res = await propertyService.createCategoriesBatch(propId, ambients);
+        if (res?.success) {
+          const cats = res.categories || res.data || [];
+          if (cats.length > 0) {
+            setSelectedPropertyDetail(prev => {
+              if (!prev) return prev;
+              const currentAmbientes = prev.ambientes || [];
+              return { ...prev, ambientes: [...currentAmbientes, ...cats] };
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[handleAddRoomToPropertyDetail] Backend sync error:', err);
     }
   };
 
@@ -1941,7 +2398,7 @@ export default function App() {
       );
       const categoryId = matchedAmb?.id || selectedRoomDetail || 'general';
 
-      const fileExt = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('aac') ? 'aac' : 'webm';
+      const fileExt = (mimeType.includes('m4a') || mimeType.includes('mp4') || mimeType.includes('aac')) ? 'm4a' : 'webm';
       const formData = new FormData();
       formData.append('audio', audioBlob, `item_${Date.now()}.${fileExt}`);
       formData.append('user_id', authUser?.id || activeProp?.userId || 'anonymous');
@@ -2265,55 +2722,57 @@ export default function App() {
     setPhotoItemPhase('analyzing');
 
     try {
-      const photoUrls = await Promise.all(
-        photoItemFiles.map(async (item) => {
-          if (item.file) {
-            return await convertFileToOptimizedBase64(item.file);
-          }
-          if (item.url && item.url.startsWith('blob:')) {
-            const resBlob = await fetch(item.url);
-            const blob = await resBlob.blob();
-            return await convertFileToOptimizedBase64(blob);
-          }
-          return item.url;
-        })
-      );
-
       const matchedAmb = (selectedPropertyDetail?.ambientes || []).find(
         a => a.name?.toLowerCase().trim() === (selectedRoomDetail || '').toLowerCase().trim()
       );
 
-      const res = await photoService.analyzePhotos({
-        photos: photoUrls,
-        property_id: selectedPropertyDetail?.id,
-        room: selectedRoomDetail,
-        category_id: matchedAmb?.id || null,
-        item_type: itemType
+      // Análisis individual por foto en paralelo (como en aitem_back de producción):
+      // Cada foto se analiza aisladamente con 100% de atención del modelo,
+      // asociando cada ítem directamente a su photoId sin saturar a la IA ni adivinar índices.
+      const analysisPromises = photoItemFiles.map(async (photoItem, photoIdx) => {
+        let photoUrl = photoItem.url;
+        if (photoItem.file) {
+          photoUrl = await convertFileToOptimizedBase64(photoItem.file);
+        } else if (photoItem.url && photoItem.url.startsWith('blob:')) {
+          const resBlob = await fetch(photoItem.url);
+          const blob = await resBlob.blob();
+          photoUrl = await convertFileToOptimizedBase64(blob);
+        }
+
+        const res = await photoService.analyzePhotos({
+          photos: [photoUrl],
+          property_id: selectedPropertyDetail?.id,
+          room: selectedRoomDetail,
+          category_id: matchedAmb?.id || null,
+          item_type: itemType
+        });
+
+        if (res.success && Array.isArray(res.data?.items)) {
+          return res.data.items.map((it, itemIdx) => ({
+            id: `photo-item-${Date.now()}-${photoIdx}-${itemIdx}`,
+            name: it.name || '',
+            description: it.description || '',
+            quantity: it.quantity || 1,
+            status: it.status || 'Bueno',
+            checked: true,
+            photoId: photoItem.id,
+            photoIndex: photoIdx + 1,
+            structure: itemType === 'structure'
+          }));
+        }
+        return [];
       });
 
-      if (res.success && res.data?.items) {
-        const items = res.data.items.map((item, idx) => ({
-          id: `photo-item-${Date.now()}-${idx}`,
-          name: item.name || '',
-          description: item.description || '',
-          quantity: item.quantity || 1,
-          status: item.status || 'Bueno',
-          checked: true,
-          photoId: photoItemFiles[idx % photoItemFiles.length]?.id || 'all',
-          structure: itemType === 'structure'
-        }));
+      const resultsPerPhoto = await Promise.all(analysisPromises);
+      const allDetectedItems = resultsPerPhoto.flat();
 
-        if (items.length === 0) {
-          toast.info(`No se identificaron elementos de ${itemType === 'structure' ? 'estructura' : 'mobiliario'} en las fotos analizadas.`);
-          setPhotoItemPhase('upload');
-        } else {
-          setPhotoDetectedItems(items);
-          setSelectedPhotoReviewId('all');
-          setPhotoItemPhase('review');
-        }
-      } else {
-        toast.error(res.message || res.error || 'Error al analizar las fotos.');
+      if (allDetectedItems.length === 0) {
+        toast.info(`No se identificaron elementos de ${itemType === 'structure' ? 'estructura' : 'mobiliario'} en las fotos analizadas.`);
         setPhotoItemPhase('upload');
+      } else {
+        setPhotoDetectedItems(allDetectedItems);
+        setSelectedPhotoReviewId('all');
+        setPhotoItemPhase('review');
       }
     } catch (err) {
       console.error('Error al analizar fotos con IA:', err);
@@ -2567,7 +3026,7 @@ export default function App() {
     setIsFloorPlanEditorOpen(true);
   };
 
-  const handleSaveFloorPlan = async (planPayload) => {
+  const handleSaveFloorPlan = async (planPayload, andClose = true) => {
     if (!selectedPropertyDetail) return;
     const propId = selectedPropertyDetail.id;
 
@@ -2578,7 +3037,9 @@ export default function App() {
     };
     setSelectedPropertyDetail(updatedProp);
     setProperties(prev => prev.map(p => p.id === propId ? updatedProp : p));
-    setIsFloorPlanEditorOpen(false);
+    if (andClose) {
+      setIsFloorPlanEditorOpen(false);
+    }
 
     // Guardado persistente en la base de datos Supabase vía API
     try {
@@ -2689,6 +3150,8 @@ export default function App() {
     setIsRecording(false);
     setIsAddingCustomRoom(false);
     setCustomRoomInput('');
+    setCustomRoomType('habitacion');
+    setIsCreatingQuickRoom(false);
     setRoomPhotos([]);
     setGeneratedPlan(false);
     setUploadedPlanFile(null);
@@ -2725,17 +3188,73 @@ export default function App() {
     setActionStep(3);
   };
 
-  const handleAddCustomRoom = (e) => {
-    e.preventDefault();
-    if (!customRoomInput.trim()) return;
-    const roomName = customRoomInput.trim();
-    if (selectedProperty && !selectedProperty.rooms.includes(roomName)) {
-      selectedProperty.rooms.push(roomName);
+  const handleAddCustomRoom = async (e, roomNameOverride, roomTypeOverride) => {
+    if (e && e.preventDefault) e.preventDefault();
+    const rawName = (roomNameOverride || customRoomInput).trim();
+    if (!rawName || !selectedProperty) return;
+
+    const propId = selectedProperty.id;
+    const currentRooms = selectedProperty.rooms || [];
+    const currentAmbientes = selectedProperty.ambientes || [];
+    const type = roomTypeOverride || customRoomType || 'habitacion';
+
+    setIsCreatingQuickRoom(true);
+
+    try {
+      // 1. Persistir categoría en Backend / Supabase
+      const res = await propertyService.createCategory({
+        propertyId: propId,
+        name: rawName,
+        type: type,
+      });
+
+      let createdCat = null;
+      if (res?.success && (res?.category || res?.data)) {
+        createdCat = res.category || res.data;
+      } else {
+        createdCat = {
+          id: `cat-${Date.now()}`,
+          name: rawName,
+          type: type,
+          property_id: propId,
+        };
+      }
+
+      const updatedAmbientes = currentAmbientes.some(a => a.id === createdCat.id)
+        ? currentAmbientes
+        : [...currentAmbientes, createdCat];
+
+      const updatedRooms = currentRooms.includes(rawName)
+        ? currentRooms
+        : [...currentRooms, rawName];
+
+      const updatedProp = {
+        ...selectedProperty,
+        rooms: updatedRooms,
+        ambientes: updatedAmbientes,
+      };
+
+      setSelectedProperty(updatedProp);
+      if (selectedPropertyDetail && selectedPropertyDetail.id === propId) {
+        setSelectedPropertyDetail(prev => ({
+          ...prev,
+          rooms: updatedRooms,
+          ambientes: updatedAmbientes,
+        }));
+      }
+      setProperties(prev => prev.map(p => p.id === propId ? { ...p, rooms: updatedRooms, ambientes: updatedAmbientes } : p));
+
+      setSelectedRoom(rawName);
+      setActionStep(3);
+      setCustomRoomInput('');
+      setIsAddingCustomRoom(false);
+      toast.success(`Ambiente "${rawName}" creado`);
+    } catch (err) {
+      console.error('Error creando ambiente en acción rápida:', err);
+      toast.error('No se pudo crear el ambiente: ' + (err.message || err));
+    } finally {
+      setIsCreatingQuickRoom(false);
     }
-    setSelectedRoom(roomName);
-    setActionStep(3);
-    setCustomRoomInput('');
-    setIsAddingCustomRoom(false);
   };
 
   // Renderizado condicional mientras se verifica la sesión inicial o se cargan las propiedades
@@ -2789,7 +3308,7 @@ export default function App() {
   // Renderizado condicional de vistas de inicio / autenticación
   if (authView === 'login') {
     return (
-      <div className="app-container" style={styles.appContainer}>
+      <div className="app-container app-auth-container" style={styles.appContainer}>
         <LoginScreen 
           onLogin={handleLogin}
           onRegisterSuccess={handleRegisterSuccess}
@@ -2800,7 +3319,7 @@ export default function App() {
 
   if (authView === 'verify-email') {
     return (
-      <div className="app-container" style={styles.appContainer}>
+      <div className="app-container app-auth-container" style={styles.appContainer}>
         <VerifyEmailScreen 
           email={pendingRegisterEmail}
           onContinue={() => setAuthView('create-inmobiliaria')}
@@ -2812,11 +3331,10 @@ export default function App() {
 
   if (authView === 'create-inmobiliaria') {
     return (
-      <div className="app-container" style={styles.appContainer}>
+      <div className="app-container app-auth-container" style={styles.appContainer}>
         <CreateInmobiliariaScreen 
           initialData={pendingRegisterData}
           onCompleteInmobiliaria={handleCompleteInmobiliaria}
-          onSkip={() => setAuthView('app')}
         />
       </div>
     );
@@ -3070,8 +3588,14 @@ export default function App() {
 
                         {/* Indicador estilizado y unificado de Ambientes e Ítems en cápsula frosted glass */}
                         {(() => {
-                          const ambCount = item.ambientes ?? (item.rooms ? item.rooms.length : 0);
-                          const itemsCount = item.items ?? item.itemsCount ?? item.total_items ?? 0;
+                          const ambCount = getPropRoomsCount(item);
+                          const itemsCount = typeof item.itemsCount === 'number'
+                            ? item.itemsCount
+                            : (typeof item.items === 'number'
+                                ? item.items
+                                : (typeof item.total_items === 'number'
+                                    ? item.total_items
+                                    : (Array.isArray(item.items) ? item.items.length : 0)));
                           return (
                             <div style={{
                               display: 'inline-flex',
@@ -3216,18 +3740,18 @@ export default function App() {
                 <ChevronRight size={16} color="#cbd5e1" />
               </div>
 
-              {/* Botón 3: Planos */}
+              {/* Botón 3: Crear propiedad */}
               <div 
                 className="app-quick-card"
                 style={styles.quickCard}
-                onClick={() => openQuickAction('plans')}
+                onClick={() => setIsModalOpen(true)}
               >
                 <div className="app-quick-icon-box" style={styles.quickIconBox}>
-                  <Layers size={18} color="#4f46e5" strokeWidth={2.2} />
+                  <Plus size={18} color="#4f46e5" strokeWidth={2.4} />
                 </div>
                 <div style={styles.quickInfo}>
-                  <h4 className="app-quick-card-title" style={styles.quickCardTitle}>Planos y croquis</h4>
-                  <p className="app-quick-card-desc" style={styles.quickCardDesc}>Distribución y medidas por ambiente</p>
+                  <h4 className="app-quick-card-title" style={styles.quickCardTitle}>Crear propiedad</h4>
+                  <p className="app-quick-card-desc" style={styles.quickCardDesc}>Registrá un nuevo inmueble o inventario</p>
                 </div>
                 <ChevronRight size={16} color="#cbd5e1" />
               </div>
@@ -3241,7 +3765,7 @@ export default function App() {
       {/* ============ VISTA 2: TAB PROPIEDADES ============ */}
       {activeTab === 'propiedades' && (
         <main key="properties-view" className="app-main-content" style={styles.mainContent}>
-          <div style={styles.tabHeader}>
+          <div className="app-tab-header" style={styles.tabHeader}>
             <h2 style={styles.sectionTitle}>
               {propertyFilterScope === 'compartidas' ? 'Propiedades compartidas' : 'Mis propiedades'}
             </h2>
@@ -3251,7 +3775,7 @@ export default function App() {
           </div>
 
           {isLoadingProperties ? (
-            <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div className="app-tab-content-list" style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {[1, 2, 3, 4].map((i) => (
                 <div 
                   key={i} 
@@ -3278,7 +3802,7 @@ export default function App() {
           ) : properties.length > 0 ? (
             <>
               {/* Barra de Filtro y Orden */}
-              <div style={styles.tabControlsContainer}>
+              <div className="app-tab-controls-container" style={styles.tabControlsContainer}>
                 {/* Pestañas de ámbito: Mis propiedades | Compartidas */}
                 <div style={styles.propertiesScopeTabs}>
                   <button
@@ -3518,7 +4042,9 @@ export default function App() {
       {/* ============ VISTA 3: DETALLE DE PROPIEDAD ============ */}
       {activeTab === 'property-detail' && selectedPropertyDetail && (() => {
         const propertyInventory = selectedPropertyDetail.inventory || getPropertyInventory(selectedPropertyDetail);
-        const detailRooms = selectedPropertyDetail.rooms || [];
+        const detailRooms = (selectedPropertyDetail.rooms && selectedPropertyDetail.rooms.length > 0)
+          ? selectedPropertyDetail.rooms.map(r => typeof r === 'string' ? r : (r?.name || 'Ambiente'))
+          : (selectedPropertyDetail.ambientes ? selectedPropertyDetail.ambientes.map(a => typeof a === 'string' ? a : (a?.name || 'Ambiente')) : []);
         const totalItemsCount = Object.values(propertyInventory).reduce((acc, items) => {
           return acc + (items || []).reduce((sum, it) => sum + (parseInt(it.quantity, 10) || 1), 0);
         }, 0);
@@ -4310,13 +4836,106 @@ export default function App() {
                 <span style={styles.roomPropertyBreadcrumb}>{selectedPropertyDetail.name}</span>
               </div>
 
-              {/* Cabecera del ambiente con título, contador y botón único de acción */}
+              {/* Cabecera del ambiente con título, contador, acción y menú 3-dots */}
               <div style={styles.roomFocusCard}>
                 <div style={styles.roomFocusTopRow}>
                   <h2 style={styles.roomFocusTitle}>{selectedRoomDetail}</h2>
-                  <span style={styles.roomFocusBadge}>
-                    {roomTotalQty} {roomTotalQty === 1 ? 'ítem' : 'ítems'}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={styles.roomFocusBadge}>
+                      {roomTotalQty} {roomTotalQty === 1 ? 'ítem' : 'ítems'}
+                    </span>
+                    {/* Menú 3-dots del ambiente */}
+                    <div style={{ position: 'relative' }}>
+                      <button
+                        type="button"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: '34px',
+                          height: '34px',
+                          borderRadius: '10px',
+                          border: '1px solid #e2e8f0',
+                          backgroundColor: isRoomMenuOpen ? '#f1f5f9' : '#ffffff',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                        }}
+                        onClick={() => setIsRoomMenuOpen(!isRoomMenuOpen)}
+                        aria-label="Opciones del ambiente"
+                      >
+                        <MoreVertical size={16} color="#64748b" />
+                      </button>
+
+                      {isRoomMenuOpen && (
+                        <>
+                          <div
+                            style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 998 }}
+                            onClick={() => setIsRoomMenuOpen(false)}
+                          />
+                          <div style={{
+                            position: 'absolute',
+                            top: '40px',
+                            right: '0',
+                            backgroundColor: '#ffffff',
+                            borderRadius: '14px',
+                            border: '1px solid #e2e8f0',
+                            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                            zIndex: 999,
+                            minWidth: '180px',
+                            overflow: 'hidden',
+                          }}>
+                            <button
+                              type="button"
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '10px',
+                                width: '100%',
+                                padding: '13px 16px',
+                                border: 'none',
+                                backgroundColor: 'transparent',
+                                cursor: 'pointer',
+                                fontSize: '14px',
+                                fontWeight: '500',
+                                color: '#1e293b',
+                                borderBottom: '1px solid #f1f5f9',
+                              }}
+                              onClick={() => {
+                                setIsRoomMenuOpen(false);
+                                handleOpenEditRoom(selectedRoomDetail);
+                              }}
+                            >
+                              <Pencil size={15} color="#4f46e5" />
+                              <span>Editar ambiente</span>
+                            </button>
+                            <button
+                              type="button"
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '10px',
+                                width: '100%',
+                                padding: '13px 16px',
+                                border: 'none',
+                                backgroundColor: 'transparent',
+                                cursor: 'pointer',
+                                fontSize: '14px',
+                                fontWeight: '500',
+                                color: '#dc2626',
+                              }}
+                              onClick={() => {
+                                setIsRoomMenuOpen(false);
+                                setRoomToDelete(selectedRoomDetail);
+                              }}
+                            >
+                              <Trash2 size={15} color="#dc2626" />
+                              <span>Eliminar ambiente</span>
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 <div style={styles.roomFocusActions}>
@@ -4408,26 +5027,100 @@ export default function App() {
                             )}
                           </div>
 
-                          {/* Botones de acción */}
-                          <div style={styles.detailItemActions}>
+                          {/* Menú de 3 dots con opciones */}
+                          <div style={{ position: 'relative' }}>
                             <button 
                               type="button" 
-                              style={styles.detailItemEditBtn}
-                              onClick={() => handleStartDetailEdit(item)}
-                              aria-label={`Editar ${item.name}`}
-                              title="Editar ítem"
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '10px',
+                                border: '1px solid #e2e8f0',
+                                backgroundColor: openItemMenuId === item.id ? '#f1f5f9' : '#ffffff',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenItemMenuId(openItemMenuId === item.id ? null : item.id);
+                              }}
+                              aria-label={`Opciones de ${item.name}`}
                             >
-                              <Pencil size={13} color="#475569" />
+                              <MoreVertical size={15} color="#64748b" />
                             </button>
-                            <button 
-                              type="button" 
-                              style={styles.detailItemDeleteBtn}
-                              onClick={() => handleDeleteDetailItem(selectedRoomDetail, item.id)}
-                              aria-label={`Eliminar ${item.name}`}
-                              title="Eliminar ítem"
-                            >
-                              <Trash2 size={13} color="#94a3b8" />
-                            </button>
+
+                            {openItemMenuId === item.id && (
+                              <>
+                                {/* Overlay invisible para cerrar */}
+                                <div 
+                                  style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 998 }}
+                                  onClick={() => setOpenItemMenuId(null)}
+                                />
+                                <div style={{
+                                  position: 'absolute',
+                                  top: '38px',
+                                  right: '0',
+                                  backgroundColor: '#ffffff',
+                                  borderRadius: '14px',
+                                  border: '1px solid #e2e8f0',
+                                  boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                                  zIndex: 999,
+                                  minWidth: '160px',
+                                  overflow: 'hidden',
+                                }}>
+                                  <button
+                                    type="button"
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '10px',
+                                      width: '100%',
+                                      padding: '12px 16px',
+                                      border: 'none',
+                                      backgroundColor: 'transparent',
+                                      cursor: 'pointer',
+                                      fontSize: '14px',
+                                      fontWeight: '500',
+                                      color: '#1e293b',
+                                      borderBottom: '1px solid #f1f5f9',
+                                    }}
+                                    onClick={() => {
+                                      setOpenItemMenuId(null);
+                                      handleStartDetailEdit(item);
+                                    }}
+                                  >
+                                    <Pencil size={15} color="#4f46e5" />
+                                    <span>Editar ítem</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '10px',
+                                      width: '100%',
+                                      padding: '12px 16px',
+                                      border: 'none',
+                                      backgroundColor: 'transparent',
+                                      cursor: 'pointer',
+                                      fontSize: '14px',
+                                      fontWeight: '500',
+                                      color: '#dc2626',
+                                    }}
+                                    onClick={() => {
+                                      setOpenItemMenuId(null);
+                                      handleDeleteDetailItem(selectedRoomDetail, item);
+                                    }}
+                                  >
+                                    <Trash2 size={15} color="#dc2626" />
+                                    <span>Eliminar ítem</span>
+                                  </button>
+                                </div>
+                              </>
+                            )}
                           </div>
                         </div>
 
@@ -4579,13 +5272,17 @@ export default function App() {
                     itemAddMethod === 'photo' ? `${selectedRoomDetail} • Detección visual inteligente` :
                     `${selectedRoomDetail} • Carga detallada por teclado`
                   }
-                  size="full"
+                  size={itemAddMethod === 'select' ? 'auto' : 'full'}
                   showBackButton={itemAddMethod !== 'select'}
                   onBack={() => setItemAddMethod('select')}
                 >
                     <div 
                       style={{
-                        ...(itemAddMethod === 'photo' && photoItemPhase === 'upload' ? { overflow: 'hidden', paddingBottom: 0 } : {})
+                        width: '100%',
+                        maxWidth: '100%',
+                        boxSizing: 'border-box',
+                        overflowX: 'hidden',
+                        ...(itemAddMethod === 'photo' && photoItemPhase === 'upload' ? { paddingBottom: 0 } : {})
                       }}
                     >
                       {/* ---- PASO 1: SELECTOR DE MÉTODO (3 OPCIONES) ---- */}
@@ -5271,6 +5968,20 @@ export default function App() {
                                                     {item.status}
                                                   </span>
                                                 )}
+                                                {selectedPhotoReviewId === 'all' && item.photoIndex && photoItemFiles.length > 1 && (
+                                                  <span style={{
+                                                    fontSize: '10.5px',
+                                                    fontWeight: '600',
+                                                    padding: '2px 7px',
+                                                    borderRadius: '6px',
+                                                    backgroundColor: '#f1f5f9',
+                                                    color: '#475569',
+                                                    border: '1px solid #e2e8f0',
+                                                    whiteSpace: 'nowrap'
+                                                  }}>
+                                                    Foto {item.photoIndex}
+                                                  </span>
+                                                )}
                                               </div>
                                             </div>
 
@@ -5686,15 +6397,36 @@ export default function App() {
                       <div style={styles.propertyOptionDivider} />
                       <button
                         type="button"
-                        style={styles.propertyOptionItemDanger}
+                        style={styles.propertyOptionItem}
                         onClick={() => {
                           setIsPropertyOptionsMenuOpen(false);
-                          setIsDeletePropertyModalOpen(true);
+                          setIsPropertyLogsModalOpen(true);
                         }}
                       >
-                        <Trash2 size={14} color="#ef4444" />
-                        <span>Eliminar propiedad</span>
+                        <History size={14} color="#4f46e5" />
+                        <span>Historial de actividad</span>
                       </button>
+                      {!Boolean(
+                        selectedPropertyDetail.isShared || 
+                        selectedPropertyDetail.is_shared || 
+                        (currentUserId && selectedPropertyDetail.userId && String(selectedPropertyDetail.userId) !== String(currentUserId)) ||
+                        (currentUserId && selectedPropertyDetail.user_id && String(selectedPropertyDetail.user_id) !== String(currentUserId))
+                      ) && (
+                        <>
+                          <div style={styles.propertyOptionDivider} />
+                          <button
+                            type="button"
+                            style={styles.propertyOptionItemDanger}
+                            onClick={() => {
+                              setIsPropertyOptionsMenuOpen(false);
+                              setIsDeletePropertyModalOpen(true);
+                            }}
+                          >
+                            <Trash2 size={14} color="#ef4444" />
+                            <span>Eliminar propiedad</span>
+                          </button>
+                        </>
+                      )}
                     </div>
                   </>
                 )}
@@ -5761,7 +6493,7 @@ export default function App() {
                 aria-label="Exportar PDF"
               >
                 <FileText size={16} color="#ffffff" strokeWidth={2.2} />
-                <span>Exportar PDF</span>
+                <span>{selectedPropertyDetail.hasPdf || selectedPropertyDetail.pdf?.pdf_url ? 'Inventario Oficial (PDF)' : 'Exportar PDF'}</span>
               </button>
 
               {!Boolean(
@@ -6730,6 +7462,197 @@ export default function App() {
             </div>
         </BottomSheet>
       )}
+      {/* ============ MODAL CONFIRMAR ELIMINAR ÍTEM ============ */}
+      {itemToDelete && (
+        <BottomSheet
+          isOpen={!!itemToDelete}
+          onClose={() => !isDeletingItem && setItemToDelete(null)}
+          size="auto"
+        >
+            <div style={styles.deleteIconWrap}>
+              <Trash2 size={24} color="#ef4444" strokeWidth={2.2} />
+            </div>
+
+            <h4 style={styles.deleteConfirmTitle}>¿Eliminar ítem?</h4>
+            <p style={styles.deleteConfirmDesc}>
+              ¿Estás seguro de que deseas eliminar <strong>"{itemToDelete.item?.name}"</strong> del ambiente <strong>"{itemToDelete.roomName}"</strong>? Esta acción no se puede deshacer.
+            </p>
+
+            <div style={styles.deleteConfirmActions}>
+              <button
+                type="button"
+                style={styles.deleteCancelBtn}
+                onClick={() => setItemToDelete(null)}
+                disabled={isDeletingItem}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                style={styles.deleteConfirmSolidBtn}
+                onClick={handleConfirmDeleteItem}
+                disabled={isDeletingItem}
+              >
+                {isDeletingItem ? (
+                  <>
+                    <Loader2 size={15} color="#ffffff" style={{ animation: 'spin 1s linear infinite' }} />
+                    <span>Eliminando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={15} color="#ffffff" />
+                    <span>Eliminar ítem</span>
+                  </>
+                )}
+              </button>
+            </div>
+        </BottomSheet>
+      )}
+
+      {/* ============ MODAL CONFIRMAR ELIMINAR AMBIENTE ============ */}
+      {roomToDelete && (
+        <BottomSheet
+          isOpen={!!roomToDelete}
+          onClose={() => !isDeletingRoom && setRoomToDelete(null)}
+          size="auto"
+        >
+            <div style={styles.deleteIconWrap}>
+              <Trash2 size={24} color="#ef4444" strokeWidth={2.2} />
+            </div>
+
+            <h4 style={styles.deleteConfirmTitle}>¿Eliminar ambiente?</h4>
+            <p style={styles.deleteConfirmDesc}>
+              ¿Estás seguro de que deseas eliminar el ambiente <strong>"{roomToDelete}"</strong>? Todos los ítems registrados en este ambiente también serán eliminados.
+            </p>
+
+            <div style={styles.deleteConfirmActions}>
+              <button
+                type="button"
+                style={styles.deleteCancelBtn}
+                onClick={() => setRoomToDelete(null)}
+                disabled={isDeletingRoom}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                style={styles.deleteConfirmSolidBtn}
+                onClick={handleConfirmDeleteRoom}
+                disabled={isDeletingRoom}
+              >
+                {isDeletingRoom ? (
+                  <>
+                    <Loader2 size={15} color="#ffffff" style={{ animation: 'spin 1s linear infinite' }} />
+                    <span>Eliminando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={15} color="#ffffff" />
+                    <span>Eliminar ambiente</span>
+                  </>
+                )}
+              </button>
+            </div>
+        </BottomSheet>
+      )}
+
+      {/* ============ MODAL EDITAR AMBIENTE ============ */}
+      {isEditRoomModalOpen && (
+        <BottomSheet
+          isOpen={isEditRoomModalOpen}
+          onClose={() => !isSavingRoomEdit && setIsEditRoomModalOpen(false)}
+          size="auto"
+        >
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '44px',
+              height: '44px',
+              borderRadius: '14px',
+              backgroundColor: '#eef2ff',
+              margin: '0 auto 12px',
+            }}>
+              <Pencil size={22} color="#4f46e5" strokeWidth={2} />
+            </div>
+
+            <h4 style={styles.deleteConfirmTitle}>Editar ambiente</h4>
+            <p style={{ ...styles.deleteConfirmDesc, marginBottom: '16px' }}>
+              Cambiá el nombre del ambiente <strong>"{editRoomOriginalName}"</strong>
+            </p>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '12px',
+                fontWeight: '600',
+                color: '#64748b',
+                marginBottom: '6px',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+              }}>
+                Nombre del ambiente
+              </label>
+              <input
+                type="text"
+                value={editRoomName}
+                onChange={(e) => setEditRoomName(e.target.value)}
+                placeholder="Ej: Cocina, Living, Dormitorio..."
+                style={{
+                  width: '100%',
+                  padding: '12px 14px',
+                  borderRadius: '12px',
+                  border: '1.5px solid #e2e8f0',
+                  fontSize: '15px',
+                  fontWeight: '500',
+                  color: '#0f172a',
+                  outline: 'none',
+                  backgroundColor: '#f8fafc',
+                  transition: 'border-color 0.2s ease',
+                  boxSizing: 'border-box',
+                }}
+                onFocus={(e) => e.target.style.borderColor = '#4f46e5'}
+                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveEditedRoom();
+                }}
+              />
+            </div>
+
+            <div style={styles.deleteConfirmActions}>
+              <button
+                type="button"
+                style={styles.deleteCancelBtn}
+                onClick={() => setIsEditRoomModalOpen(false)}
+                disabled={isSavingRoomEdit}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...styles.deleteConfirmSolidBtn,
+                  backgroundColor: '#4f46e5',
+                }}
+                onClick={handleSaveEditedRoom}
+                disabled={isSavingRoomEdit || !editRoomName.trim()}
+              >
+                {isSavingRoomEdit ? (
+                  <>
+                    <Loader2 size={15} color="#ffffff" style={{ animation: 'spin 1s linear infinite' }} />
+                    <span>Guardando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check size={15} color="#ffffff" />
+                    <span>Guardar cambios</span>
+                  </>
+                )}
+              </button>
+            </div>
+        </BottomSheet>
+      )}
 
       {/* ============ MODAL EDITAR PROPIEDAD ============ */}
       <EditPropertyModal
@@ -7035,56 +7958,108 @@ export default function App() {
                   <span>Volver</span>
                 </button>
 
-                <div style={styles.roomsGrid}>
-                  {(selectedProperty.rooms || []).map((room) => (
-                    <button 
-                      key={room}
-                      style={styles.roomSelectChip}
-                      onClick={() => handleSelectRoom(room)}
-                    >
-                      <span>{room}</span>
-                      <ChevronRight size={14} color="#64748b" />
-                    </button>
-                  ))}
-                  {(!selectedProperty.rooms || selectedProperty.rooms.length === 0) && (
-                    <p style={{ fontSize: '12px', color: '#64748b', gridColumn: '1 / -1', margin: '4px 0 10px 0' }}>
-                      Esta propiedad no tiene ambientes cargados aún. Agrega uno a continuación:
-                    </p>
-                  )}
-                </div>
+                {/* Ambientes existentes si los hay */}
+                {(selectedProperty.rooms || []).length > 0 && !isAddingCustomRoom && (
+                  <>
+                    <div style={styles.roomsGrid}>
+                      {(selectedProperty.rooms || []).map((room) => (
+                        <button 
+                          key={room}
+                          style={styles.roomSelectChip}
+                          onClick={() => handleSelectRoom(room)}
+                        >
+                          <span>{room}</span>
+                          <ChevronRight size={14} color="#64748b" />
+                        </button>
+                      ))}
+                    </div>
 
-                {/* Opción de agregar ambiente personalizado */}
-                {isAddingCustomRoom ? (
-                  <form onSubmit={handleAddCustomRoom} style={styles.customRoomForm}>
-                    <input 
-                      type="text"
-                      placeholder="Nombre del ambiente (ej: Quincho, Playroom)..."
-                      value={customRoomInput}
-                      onChange={(e) => setCustomRoomInput(e.target.value)}
-                      style={styles.formInput}
-                      autoFocus
-                    />
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button type="submit" style={styles.saveCustomRoomBtn}>
-                        <span>Agregar y continuar</span>
-                      </button>
-                      <button 
-                        type="button" 
-                        style={styles.cancelCustomRoomBtn}
-                        onClick={() => setIsAddingCustomRoom(false)}
+                    <button 
+                      style={styles.addCustomRoomTrigger}
+                      onClick={() => setIsAddingCustomRoom(true)}
+                    >
+                      <Plus size={15} color="#4f46e5" strokeWidth={2.4} />
+                      <span>Agregar otro ambiente</span>
+                    </button>
+                  </>
+                )}
+
+                {/* Formulario directo para escribir el nombre y elegir el tipo */}
+                {((!selectedProperty.rooms || selectedProperty.rooms.length === 0) || isAddingCustomRoom) && (
+                  <form onSubmit={handleAddCustomRoom} style={{ ...styles.customRoomForm, marginTop: '4px' }}>
+                    {(!selectedProperty.rooms || selectedProperty.rooms.length === 0) && (
+                      <p style={{ fontSize: '12.5px', color: '#64748b', margin: '0 0 10px 0' }}>
+                        Esta propiedad no tiene ambientes cargados aún. Creá el primero a continuación:
+                      </p>
+                    )}
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: '600', color: '#334155' }}>
+                        Nombre del ambiente
+                      </label>
+                      <input 
+                        type="text"
+                        placeholder="Ej: Cocina, Living, Dormitorio 1..."
+                        value={customRoomInput}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setCustomRoomInput(val);
+                          const lower = val.toLowerCase();
+                          if (lower.includes('cocina')) setCustomRoomType('cocina');
+                          else if (lower.includes('baño') || lower.includes('toilette')) setCustomRoomType('baño');
+                          else if (lower.includes('dorm') || lower.includes('habita') || lower.includes('cuarto')) setCustomRoomType('habitacion');
+                          else if (lower.includes('terraza') || lower.includes('balcon') || lower.includes('balcón') || lower.includes('patio')) setCustomRoomType('terraza');
+                          else if (lower.includes('living') || lower.includes('comedor') || lower.includes('estar')) setCustomRoomType('living');
+                        }}
+                        style={styles.formInput}
+                        autoFocus
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: '600', color: '#334155' }}>
+                        Tipo de ambiente
+                      </label>
+                      <select
+                        value={customRoomType}
+                        onChange={(e) => setCustomRoomType(e.target.value)}
+                        style={styles.formInput}
                       >
-                        <span>Cancelar</span>
+                        <option value="living">Living</option>
+                        <option value="comedor">Comedor</option>
+                        <option value="cocina">Cocina</option>
+                        <option value="habitacion">Dormitorio</option>
+                        <option value="baño">Baño</option>
+                        <option value="terraza">Terraza / Balcón</option>
+                        <option value="patio">Patio / Jardín</option>
+                        <option value="garaje">Garaje</option>
+                        <option value="gimnasio">Gimnasio</option>
+                        <option value="otro">Otro</option>
+                      </select>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                      <button 
+                        type="submit" 
+                        disabled={isCreatingQuickRoom || !customRoomInput.trim()}
+                        style={{
+                          ...styles.saveCustomRoomBtn,
+                          opacity: (isCreatingQuickRoom || !customRoomInput.trim()) ? 0.6 : 1,
+                        }}
+                      >
+                        <span>{isCreatingQuickRoom ? 'Creando...' : 'Crear y continuar'}</span>
                       </button>
+                      {(selectedProperty.rooms || []).length > 0 && (
+                        <button 
+                          type="button" 
+                          style={styles.cancelCustomRoomBtn}
+                          onClick={() => setIsAddingCustomRoom(false)}
+                        >
+                          <span>Cancelar</span>
+                        </button>
+                      )}
                     </div>
                   </form>
-                ) : (
-                  <button 
-                    style={styles.addCustomRoomTrigger}
-                    onClick={() => setIsAddingCustomRoom(true)}
-                  >
-                    <Plus size={15} color="#4f46e5" strokeWidth={2.4} />
-                    <span>Agregar otro ambiente</span>
-                  </button>
                 )}
               </div>
             )}
@@ -7729,6 +8704,15 @@ export default function App() {
         />
       )}
 
+      {/* ============ MODAL DE HISTORIAL DE ACTIVIDAD / AUDITORÍA DE LA PROPIEDAD ============ */}
+      {isPropertyLogsModalOpen && selectedPropertyDetail && (
+        <PropertyLogsModal
+          isOpen={isPropertyLogsModalOpen}
+          onClose={() => setIsPropertyLogsModalOpen(false)}
+          property={selectedPropertyDetail}
+        />
+      )}
+
       {/* ============ WIDGET FLOTANTE DE PROGRESO DE FOTOS EN BACKGROUND ============ */}
       <PhotoUploadProgress onPhotoUploaded={handlePhotoUploaded} />
 
@@ -7739,14 +8723,11 @@ export default function App() {
 const styles = {
   appContainer: {
     width: '100%',
-    maxWidth: '480px',
-    margin: '0 auto',
     minHeight: '100vh',
     display: 'flex',
     flexDirection: 'column',
     backgroundColor: '#ffffff',
     position: 'relative',
-    boxShadow: '0 0 40px rgba(0, 0, 0, 0.05)',
   },
 
   /* Top Bar */
@@ -8556,10 +9537,7 @@ const styles = {
   bottomNav: {
     position: 'fixed',
     bottom: 0,
-    left: '50%',
-    transform: 'translateX(-50%)',
     width: '100%',
-    maxWidth: '480px',
     zIndex: 50,
     display: 'flex',
     alignItems: 'center',
@@ -9416,9 +10394,13 @@ const styles = {
   /* Pantalla de revisión de dictado e ítems generados */
   reviewContentBlock: {
     width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
     gap: '14px',
+    overflowX: 'hidden',
+    paddingBottom: '20px',
   },
   transcriptCard: {
     display: 'flex',
@@ -9446,6 +10428,9 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: '10px',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
   },
   extractedGroupLabel: {
     fontSize: '12.5px',
@@ -9657,9 +10642,11 @@ const styles = {
   reviewActionsCol: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '8px',
-    marginTop: '6px',
-    paddingBottom: '4px',
+    gap: '10px',
+    marginTop: '12px',
+    paddingBottom: 'calc(28px + env(safe-area-inset-bottom, 16px))',
+    width: '100%',
+    boxSizing: 'border-box',
   },
   confirmItemsBtn: {
     display: 'flex',
@@ -9667,28 +10654,32 @@ const styles = {
     justifyContent: 'center',
     gap: '8px',
     width: '100%',
-    padding: '13px',
+    padding: '14px 16px',
     borderRadius: '14px',
     backgroundColor: '#0f172a',
     border: 'none',
     color: '#ffffff',
-    fontSize: '13px',
+    fontSize: '13.5px',
     fontWeight: '700',
     cursor: 'pointer',
     boxShadow: '0 4px 14px rgba(15, 23, 42, 0.15)',
+    boxSizing: 'border-box',
   },
   reRecordBtn: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    padding: '8px',
-    background: 'none',
-    border: 'none',
-    color: '#64748b',
-    fontSize: '12px',
+    padding: '12px 16px',
+    borderRadius: '12px',
+    backgroundColor: '#f1f5f9',
+    border: '1px solid #e2e8f0',
+    color: '#334155',
+    fontSize: '13px',
     fontWeight: '600',
     cursor: 'pointer',
+    boxSizing: 'border-box',
+    transition: 'all 0.15s ease',
   },
 
   /* Fotos Preview */
@@ -9977,7 +10968,7 @@ const styles = {
     border: '1px solid #e2e8f0',
     borderRadius: '14px',
     padding: '6px',
-    minWidth: '180px',
+    minWidth: '205px',
     boxShadow: '0 10px 30px rgba(15, 23, 42, 0.12)',
     zIndex: 100,
     display: 'flex',
@@ -9998,6 +10989,7 @@ const styles = {
     cursor: 'pointer',
     width: '100%',
     textAlign: 'left',
+    whiteSpace: 'nowrap',
     transition: 'background-color 0.15s ease',
   },
   propertyOptionDivider: {
@@ -12338,6 +13330,9 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: '10px',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
   },
   detectedReviewItemCard: {
     backgroundColor: '#ffffff',
@@ -12350,6 +13345,10 @@ const styles = {
     gap: '10px',
     cursor: 'pointer',
     transition: 'all 0.15s ease',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
+    overflow: 'hidden',
   },
   detectedReviewItemCardChecked: {
     backgroundColor: '#ffffff',
@@ -12363,13 +13362,14 @@ const styles = {
   },
   detectedReviewItemTopRow: {
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: '10px',
+    width: '100%',
   },
   detectedReviewItemHeaderLeft: {
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: '10px',
     flex: 1,
     minWidth: 0,
@@ -12380,12 +13380,17 @@ const styles = {
     gap: '8px',
     flex: 1,
     minWidth: 0,
+    flexWrap: 'wrap',
   },
   photoCarouselBlock: {
     display: 'flex',
     flexDirection: 'column',
     gap: '8px',
     padding: '4px 0 6px 0',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
+    overflow: 'hidden',
   },
   photoCarouselHeaderRow: {
     display: 'flex',
@@ -12411,9 +13416,14 @@ const styles = {
     gap: '10px',
     overflowX: 'auto',
     padding: '4px 2px 8px 2px',
-    margin: '0 -2px',
+    margin: 0,
     scrollbarWidth: 'none',
     WebkitOverflowScrolling: 'touch',
+    width: '100%',
+    maxWidth: '100%',
+    boxSizing: 'border-box',
+    overscrollBehaviorX: 'contain',
+    touchAction: 'pan-x pan-y',
   },
   photoCarouselItemCard: {
     flexShrink: 0,

@@ -31,8 +31,17 @@ function getFriendlyAuthError(errorMessage) {
   if (msg.includes('rate limit') || msg.includes('too many requests')) {
     return 'Demasiados intentos. Aguardá unos instantes antes de volver a intentar.';
   }
-  if (msg.includes('network')) {
+  if (msg.includes('network') || msg.includes('failed to fetch')) {
     return 'Error de conexión. Comprobá tu acceso a internet.';
+  }
+  if (msg.includes('token has expired') || msg.includes('expired')) {
+    return 'El código ha expirado o ya fue utilizado. Por favor solicitá uno nuevo.';
+  }
+  if (msg.includes('invalid token') || msg.includes('token is invalid') || msg.includes('otp') || msg.includes('token')) {
+    return 'El código ingresado es incorrecto o inválido. Verificalo e intentá de nuevo.';
+  }
+  if (msg.includes('user not found')) {
+    return 'No existe una cuenta registrada con este correo electrónico.';
   }
 
   return errorMessage;
@@ -97,11 +106,72 @@ export const authService = {
     }
   },
 
-  // Recuperar contraseña
+  // Solicitar código / enlace de recuperación de contraseña
   async resetPassword(email) {
     try {
-      const { data, error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${window.location.origin}/reset-password`,
+      const cleanEmail = email.trim();
+      const { data, error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
+      if (error) throw error;
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: getFriendlyAuthError(error.message) };
+    }
+  },
+
+  // Verificar código OTP de 6 dígitos para recuperación
+  async verifyRecoveryOtp(email, token) {
+    try {
+      const cleanEmail = email.trim();
+      const cleanToken = token.trim().replace(/\s+/g, '');
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: cleanEmail,
+        token: cleanToken,
+        type: 'recovery',
+      });
+      if (error) throw error;
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: getFriendlyAuthError(error.message) };
+    }
+  },
+
+  // Verificar código OTP de 6 dígitos para confirmación de cuenta (signup)
+  async verifySignupOtp(email, token) {
+    try {
+      const cleanEmail = email.trim();
+      const cleanToken = token.trim().replace(/\s+/g, '');
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: cleanEmail,
+        token: cleanToken,
+        type: 'signup',
+      });
+      if (error) throw error;
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: getFriendlyAuthError(error.message) };
+    }
+  },
+
+  // Reenviar código OTP de confirmación de cuenta
+  async resendSignupOtp(email) {
+    try {
+      const cleanEmail = email.trim();
+      const { data, error } = await supabase.auth.resend({
+        type: 'signup',
+        email: cleanEmail,
+      });
+      if (error) throw error;
+      return { success: true, data };
+    } catch (error) {
+      return { success: false, error: getFriendlyAuthError(error.message) };
+    }
+  },
+
+  // Actualizar contraseña una vez verificada la sesión de recuperación
+  async updatePassword(newPassword) {
+    try {
+      const { data, error } = await supabase.auth.updateUser({
+        password: newPassword,
       });
       if (error) throw error;
       return { success: true, data };

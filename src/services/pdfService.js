@@ -1,4 +1,5 @@
 import { api } from './api';
+import { supabase } from '../lib/supabase';
 
 export const pdfService = {
   /**
@@ -59,6 +60,37 @@ export const pdfService = {
     } catch (e) {
       console.error('Error al descargar el PDF:', e);
       throw e;
+    }
+  },
+
+  /**
+   * Obtener el PDF existente de una propiedad
+   * @param {string} propertyId
+   */
+  async getPropertyPdf(propertyId) {
+    try {
+      const res = await api.get(`/api/pdf/property-info/${propertyId}`);
+      if (res && res.success) {
+        return res;
+      }
+    } catch (err) {
+      console.warn('[pdfService] Fallback a Supabase para getPropertyPdf:', err);
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('pdfs')
+        .select('*')
+        .eq('property_id', propertyId)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) throw error;
+      return { success: true, hasPdf: Boolean(data?.pdf_url), pdf: data || null };
+    } catch (e) {
+      console.warn('[pdfService] Error consultando PDF de propiedad:', e);
+      return { success: false, hasPdf: false, pdf: null };
     }
   }
 };

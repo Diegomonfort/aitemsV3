@@ -4,7 +4,7 @@
 .photo-upload-progress-container.minimized {
   position: fixed;
   bottom: 96px; /* Holgado y más arriba, nunca tapa ni roza los botones del navbar ni el botón central (+) */
-  right: max(18px, calc((100vw - 480px) / 2 + 18px));
+  right: max(20px, env(safe-area-inset-right, 20px));
   z-index: 860;
   display: flex;
   align-items: center;

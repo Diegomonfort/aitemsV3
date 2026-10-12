@@ -106,16 +106,16 @@ export function useAudioRecorder() {
                 for (let i = 0; i < byteChars.length; i++) {
                   byteArray[i] = byteChars.charCodeAt(i);
                 }
-                const audioBlob = new Blob([byteArray], { type: 'audio/mp4' });
+                const audioBlob = new Blob([byteArray], { type: 'audio/m4a' });
                 console.log(`[useAudioRecorder] Blob creado exitosamente: ${audioBlob.size} bytes`);
-                resolver({ audioBlob, mimeType: 'audio/mp4' });
+                resolver({ audioBlob, mimeType: 'audio/m4a' });
               } catch (e) {
                 console.error('[useAudioRecorder] Error al convertir base64 a Blob:', e);
-                resolver({ audioBlob: new Blob([]), mimeType: 'audio/mp4' });
+                resolver({ audioBlob: new Blob([]), mimeType: 'audio/m4a' });
               }
             } else {
               console.warn('[useAudioRecorder] Evento stopped recibido sin datos base64');
-              resolver({ audioBlob: new Blob([]), mimeType: 'audio/mp4' });
+              resolver({ audioBlob: new Blob([]), mimeType: 'audio/m4a' });
             }
           }
           break;
@@ -132,7 +132,7 @@ export function useAudioRecorder() {
           if (resolveStopRef.current) {
             const resolver = resolveStopRef.current;
             resolveStopRef.current = null;
-            resolver({ audioBlob: new Blob([]), mimeType: 'audio/mp4' });
+            resolver({ audioBlob: new Blob([]), mimeType: 'audio/m4a' });
           }
           break;
 
@@ -204,7 +204,7 @@ export function useAudioRecorder() {
         console.error('[useAudioRecorder] Error al enviar stop a Swift:', err);
         if (stopTimeoutRef.current) clearTimeout(stopTimeoutRef.current);
         resolveStopRef.current = null;
-        resolve({ audioBlob: new Blob([]), mimeType: 'audio/mp4' });
+        resolve({ audioBlob: new Blob([]), mimeType: 'audio/m4a' });
       }
       stopTimer();
       setIsRecording(false);
@@ -227,7 +227,7 @@ export function useAudioRecorder() {
     if (resolveStopRef.current) {
       const resolver = resolveStopRef.current;
       resolveStopRef.current = null;
-      resolver({ audioBlob: new Blob([]), mimeType: 'audio/mp4' });
+      resolver({ audioBlob: new Blob([]), mimeType: 'audio/m4a' });
     }
   }, [stopTimer]);
 

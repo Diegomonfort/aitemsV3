@@ -1,4 +1,5 @@
 import { useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { X, ChevronLeft } from 'lucide-react';
 import './BottomSheet.css';
 
@@ -160,7 +161,7 @@ export default function BottomSheet({
 
   const sizeClass = `bs-size-${size}`;
 
-  return (
+  const sheetContent = (
     <div
       ref={backdropRef}
       className={`bs-backdrop${stacked ? ' bs-stacked' : ''}`}
@@ -220,4 +221,6 @@ export default function BottomSheet({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(sheetContent, document.body) : sheetContent;
 }

@@ -1,17 +1,51 @@
 import React, { useState } from 'react';
-import { Building2, Globe, MapPin, Camera, X, ArrowRight, AlertCircle, Loader2 } from 'lucide-react';
+import { Building2, Globe, MapPin, Camera, X, ArrowRight, AlertCircle, Loader2, ChevronDown } from 'lucide-react';
 import logo from '../../assets/logo-color.png';
 import { agencyService } from '../../services/agencyService';
+import { getCountries, getStates, getCities } from '../../data/locationData';
 
-export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobiliaria, onSkip }) {
+export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobiliaria }) {
+  const initialCountry = initialData?.country || 'Uruguay';
+  const initialStates = getStates(initialCountry);
+  const initialState = initialData?.state && initialStates.includes(initialData.state)
+    ? initialData.state
+    : (initialStates[0] || '');
+  const initialCities = getCities(initialCountry, initialState);
+  const initialCity = initialData?.city && initialCities.includes(initialData.city)
+    ? initialData.city
+    : (initialCities[0] || '');
+
   const [agencyName, setAgencyName] = useState(initialData?.agencyName || '');
   const [website, setWebsite] = useState(initialData?.website || '');
-  const [country, setCountry] = useState(initialData?.country || 'Uruguay');
-  const [city, setCity] = useState(initialData?.city || 'Montevideo');
+  const [country, setCountry] = useState(initialCountry);
+  const [availableStates, setAvailableStates] = useState(initialStates);
+  const [state, setState] = useState(initialState);
+  const [availableCities, setAvailableCities] = useState(initialCities);
+  const [city, setCity] = useState(initialCity);
   const [logoPreview, setLogoPreview] = useState(null);
 
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  const handleCountryChange = (e) => {
+    const newCountry = e.target.value;
+    setCountry(newCountry);
+    const states = getStates(newCountry);
+    setAvailableStates(states);
+    const firstState = states[0] || '';
+    setState(firstState);
+    const cities = getCities(newCountry, firstState);
+    setAvailableCities(cities);
+    setCity(cities[0] || '');
+  };
+
+  const handleStateChange = (e) => {
+    const newState = e.target.value;
+    setState(newState);
+    const cities = getCities(country, newState);
+    setAvailableCities(cities);
+    setCity(cities[0] || '');
+  };
 
   const handleLogoFile = (e) => {
     const file = e.target.files?.[0];
@@ -38,21 +72,38 @@ export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobi
     if (e) e.preventDefault();
     setError('');
 
-    if (!agencyName.trim()) {
+    const trimmedName = agencyName.trim();
+    if (!trimmedName) {
       setError('Por favor ingresá el nombre de tu inmobiliaria.');
+      return;
+    }
+
+    if (!country) {
+      setError('Por favor seleccioná el país.');
+      return;
+    }
+
+    if (!state) {
+      setError('Por favor seleccioná el departamento o provincia.');
+      return;
+    }
+
+    if (!city || !city.trim()) {
+      setError('Por favor seleccioná la ciudad.');
       return;
     }
 
     setIsLoading(true);
     try {
-      const locationText = [city.trim(), country].filter(Boolean).join(', ');
+      const locationText = [city.trim(), state, country].filter(Boolean).join(', ');
       const formattedWebsite = website.trim() 
         ? (website.startsWith('http') ? website : `https://${website.replace(/^https?:\/\//, '')}`) 
         : '';
 
       const res = await agencyService.createAgency({
-        name: agencyName.trim(),
+        name: trimmedName,
         country,
+        state,
         city: city.trim(),
         website_url: formattedWebsite,
         logo: logoPreview,
@@ -66,55 +117,24 @@ export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobi
           website: formattedWebsite,
           logo: logoPreview,
           country,
+          state,
           city: city.trim(),
         });
       } else {
-        onCompleteInmobiliaria({
-          name: agencyName.trim(),
-          location: locationText,
-          website: formattedWebsite,
-          logo: logoPreview,
-          country,
-          city: city.trim(),
-        });
+        setError(res?.message || 'No se pudo crear la inmobiliaria.');
       }
     } catch (err) {
-      console.warn('Error al crear inmobiliaria en backend:', err);
-      const locationText = [city.trim(), country].filter(Boolean).join(', ');
-      onCompleteInmobiliaria({
-        name: agencyName.trim(),
-        location: locationText,
-        website: website.trim(),
-        logo: logoPreview,
-        country,
-        city: city.trim(),
-      });
+      console.error('Error al crear inmobiliaria en backend:', err);
+      setError(err?.response?.data?.message || err.message || 'Error al conectar con el servidor.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleSkipLater = () => {
-    const fallbackName = agencyName.trim() || initialData?.agencyName || 'Mi Inmobiliaria';
-    const locationText = [city.trim(), country].filter(Boolean).join(', ');
-    if (onSkip) {
-      onSkip();
-    } else {
-      onCompleteInmobiliaria({
-        name: fallbackName,
-        location: locationText || 'Montevideo, Uruguay',
-        website: website.trim(),
-        logo: logoPreview,
-        country,
-        city: city.trim(),
-      });
-    }
-  };
-
   return (
-    <div style={styles.container}>
-      <div style={styles.scrollContent} className="no-scrollbar">
-        {/* Cabecera Limpia sin badges */}
+    <div style={styles.container} className="app-auth-screen">
+      <div style={styles.scrollContent} className="app-auth-card no-scrollbar">
+        {/* Cabecera Limpia */}
         <div style={styles.headerBox}>
           <div style={styles.logoWrapper}>
             <img src={logo} alt="Aitems" style={styles.logoImg} />
@@ -122,7 +142,7 @@ export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobi
 
           <h1 style={styles.title}>Tu Inmobiliaria</h1>
           <p style={styles.subtitle}>
-            Configurá los datos que identificarán a tu empresa en relevamientos y reportes PDF
+            Configurá los datos oficiales de tu empresa para identificar tus relevamientos e informes PDF
           </p>
         </div>
 
@@ -135,7 +155,7 @@ export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobi
         )}
 
         <form onSubmit={handleSubmit} style={styles.form}>
-          {/* Uploader de Logo Moderno tipo Avatar */}
+          {/* Uploader de Logo Moderno tipo Avatar (Opcional) */}
           <div style={styles.avatarSection}>
             <div style={styles.avatarWrapper}>
               {logoPreview ? (
@@ -169,9 +189,9 @@ export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobi
             <span style={styles.avatarHint}>Opcional • PNG, JPG hasta 5MB</span>
           </div>
 
-          {/* Grouped Card con los datos */}
+          {/* Grouped Card con los datos de la Inmobiliaria */}
           <div style={styles.groupedCard}>
-            {/* Fila: Nombre */}
+            {/* Fila 1: Nombre */}
             <div style={styles.groupedRow}>
               <Building2 size={18} color="#94a3b8" style={styles.groupedIcon} />
               <input
@@ -180,43 +200,81 @@ export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobi
                 onChange={(e) => setAgencyName(e.target.value)}
                 placeholder="Nombre de la inmobiliaria *"
                 style={styles.groupedInput}
+                required
                 autoFocus
               />
             </div>
 
             <div style={styles.groupedDivider} />
 
-            {/* Fila: Ubicación combinada (País + Ciudad) */}
+            {/* Fila 2: País */}
             <div style={styles.groupedRow}>
-              <MapPin size={18} color="#94a3b8" style={styles.groupedIcon} />
-              <div style={styles.locationWrap}>
-                <select
-                  value={country}
-                  onChange={(e) => setCountry(e.target.value)}
-                  style={styles.microSelect}
-                >
-                  <option value="Uruguay">Uruguay</option>
-                  <option value="Argentina">Argentina</option>
-                  <option value="Chile">Chile</option>
-                  <option value="Brasil">Brasil</option>
-                  <option value="Paraguay">Paraguay</option>
-                  <option value="México">México</option>
-                  <option value="Colombia">Colombia</option>
-                </select>
-                <span style={styles.locationDot}>•</span>
-                <input
-                  type="text"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  placeholder="Ciudad o zona"
-                  style={styles.microInput}
-                />
-              </div>
+              <Globe size={18} color="#94a3b8" style={styles.groupedIcon} />
+              <select
+                value={country}
+                onChange={handleCountryChange}
+                style={styles.mobileSelect}
+                required
+              >
+                {getCountries().map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <ChevronDown size={16} color="#94a3b8" style={{ marginRight: 6, pointerEvents: 'none', flexShrink: 0 }} />
             </div>
 
             <div style={styles.groupedDivider} />
 
-            {/* Fila: Sitio Web */}
+            {/* Fila 3: Departamento / Provincia */}
+            <div style={styles.groupedRow}>
+              <MapPin size={18} color="#94a3b8" style={styles.groupedIcon} />
+              <select
+                value={state}
+                onChange={handleStateChange}
+                style={styles.mobileSelect}
+                required
+              >
+                {availableStates.map((st) => (
+                  <option key={st} value={st}>{st}</option>
+                ))}
+              </select>
+              <ChevronDown size={16} color="#94a3b8" style={{ marginRight: 6, pointerEvents: 'none', flexShrink: 0 }} />
+            </div>
+
+            <div style={styles.groupedDivider} />
+
+            {/* Fila 4: Ciudad */}
+            <div style={styles.groupedRow}>
+              <MapPin size={18} color="#94a3b8" style={styles.groupedIcon} />
+              {availableCities.length > 0 ? (
+                <>
+                  <select
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    style={styles.mobileSelect}
+                    required
+                  >
+                    {availableCities.map((ct) => (
+                      <option key={ct} value={ct}>{ct}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={16} color="#94a3b8" style={{ marginRight: 6, pointerEvents: 'none', flexShrink: 0 }} />
+                </>
+              ) : (
+                <input
+                  type="text"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="Ciudad o localidad *"
+                  style={styles.groupedInput}
+                  required
+                />
+              )}
+            </div>
+
+            <div style={styles.groupedDivider} />
+
+            {/* Fila 5: Sitio Web (Opcional) */}
             <div style={styles.groupedRow}>
               <Globe size={18} color="#94a3b8" style={styles.groupedIcon} />
               <input
@@ -230,7 +288,7 @@ export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobi
             </div>
           </div>
 
-          {/* Botón Principal */}
+          {/* Botón Principal - Única acción obligatoria para continuar */}
           <button
             type="submit"
             disabled={isLoading}
@@ -239,17 +297,17 @@ export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobi
               opacity: isLoading ? 0.75 : 1,
             }}
           >
-            <span>{isLoading ? 'Guardando...' : 'Comenzar a usar Aitems'}</span>
-            {!isLoading && <ArrowRight size={17} color="#ffffff" strokeWidth={2.4} />}
-          </button>
-
-          {/* Botón Omitir / Configurar después */}
-          <button
-            type="button"
-            onClick={handleSkipLater}
-            style={styles.skipBtn}
-          >
-            Configurar más tarde
+            {isLoading ? (
+              <>
+                <Loader2 size={18} className="app-spin-anim" />
+                <span>Creando inmobiliaria...</span>
+              </>
+            ) : (
+              <>
+                <span>Comenzar a usar Aitems</span>
+                <ArrowRight size={17} color="#ffffff" strokeWidth={2.4} />
+              </>
+            )}
           </button>
         </form>
       </div>
@@ -279,6 +337,8 @@ const styles = {
     maxWidth: '440px',
     width: '100%',
     margin: '0 auto',
+    boxSizing: 'border-box',
+    justifyContent: 'center',
   },
 
   /* HEADER */
@@ -287,16 +347,16 @@ const styles = {
     flexDirection: 'column',
     alignItems: 'center',
     textAlign: 'center',
-    marginBottom: '24px',
+    marginBottom: '22px',
   },
   logoWrapper: {
+    marginBottom: '14px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: '16px',
   },
   logoImg: {
-    height: '38px',
+    height: '34px',
     width: 'auto',
     objectFit: 'contain',
   },
@@ -334,7 +394,7 @@ const styles = {
   form: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '20px',
+    gap: '18px',
     width: '100%',
   },
 
@@ -344,7 +404,7 @@ const styles = {
     flexDirection: 'column',
     alignItems: 'center',
     gap: '6px',
-    marginBottom: '4px',
+    marginBottom: '2px',
   },
   avatarWrapper: {
     position: 'relative',
@@ -433,35 +493,9 @@ const styles = {
     width: '100%',
     minWidth: 0,
   },
-  groupedDivider: {
-    height: '1px',
-    backgroundColor: '#e2e8f0',
-    marginLeft: '44px',
-  },
-
-  /* UBICACIÓN INLINE */
-  locationWrap: {
+  mobileSelect: {
     flex: 1,
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-  },
-  microSelect: {
-    border: 'none',
-    backgroundColor: 'transparent',
-    fontSize: '13.5px',
-    fontWeight: '600',
-    color: '#0f172a',
-    outline: 'none',
-    fontFamily: 'inherit',
-    cursor: 'pointer',
-  },
-  locationDot: {
-    color: '#94a3b8',
-    fontSize: '13px',
-  },
-  microInput: {
-    flex: 1,
+    height: '100%',
     border: 'none',
     backgroundColor: 'transparent',
     fontSize: '13.5px',
@@ -469,6 +503,13 @@ const styles = {
     outline: 'none',
     fontFamily: 'inherit',
     width: '100%',
+    cursor: 'pointer',
+    appearance: 'none',
+  },
+  groupedDivider: {
+    height: '1px',
+    backgroundColor: '#e2e8f0',
+    marginLeft: '44px',
   },
 
   /* BOTÓN CTA */
@@ -490,18 +531,5 @@ const styles = {
     boxShadow: '0 4px 14px rgba(15, 23, 42, 0.16)',
     marginTop: '4px',
     transition: 'all 0.15s ease',
-  },
-
-  /* BOTÓN OMITIR */
-  skipBtn: {
-    background: 'none',
-    border: 'none',
-    color: '#64748b',
-    fontSize: '13px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    padding: '8px 0',
-    textAlign: 'center',
-    transition: 'color 0.15s ease',
   },
 };

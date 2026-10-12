@@ -15,8 +15,8 @@ export default function VerifyEmailScreen({ email, onContinue, onNavigateLogin }
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.scrollContent} className="no-scrollbar">
+    <div style={styles.container} className="app-auth-screen">
+      <div style={styles.scrollContent} className="app-auth-card no-scrollbar">
         {/* Cabecera con Logo */}
         <div style={styles.logoWrapper}>
           <img src={logo} alt="Aitems" style={styles.logoImg} />

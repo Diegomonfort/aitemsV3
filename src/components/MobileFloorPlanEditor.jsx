@@ -23,7 +23,8 @@ import {
   ArrowUpDown,
   Pencil,
   Lock,
-  Unlock
+  Unlock,
+  AlertTriangle
 } from 'lucide-react';
 
 // Generador de IDs únicos
@@ -96,6 +97,36 @@ export default function MobileFloorPlanEditor({
   // Pilas de Historial (Undo / Redo)
   const [history, setHistory] = useState(() => [floors]);
   const [historyIndex, setHistoryIndex] = useState(0);
+
+  // Snapshot de pisos guardados para detectar cambios pendientes
+  const [savedSnapshot, setSavedSnapshot] = useState(() => JSON.stringify(floors));
+  const [showExitConfirmModal, setShowExitConfirmModal] = useState(false);
+
+  // Detectar si hay cambios sin guardar
+  const currentFloorsJson = JSON.stringify(floors);
+  const hasUnsavedChanges = currentFloorsJson !== savedSnapshot;
+
+  // Alerta nativa del navegador al intentar cerrar pestaña, recargar o ir atrás
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = 'Tenés cambios sin guardar en el plano arquitectónico.';
+        return e.returnValue;
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  // Manejar intento de cierre / volver
+  const handleAttemptClose = () => {
+    if (hasUnsavedChanges) {
+      setShowExitConfirmModal(true);
+    } else {
+      if (onClose) onClose();
+    }
+  };
 
   // Modales y menús
   const [isAddMenuOpen, setIsAddMenuOpen] = useState(false);
@@ -915,7 +946,7 @@ export default function MobileFloorPlanEditor({
   }, [activeFloorId]);
 
   // GUARDAR PLANO
-  const handleSavePlan = () => {
+  const handleSavePlan = (andClose = true) => {
     const payload = {
       property_id: property?.id,
       name: planTitle,
@@ -925,10 +956,14 @@ export default function MobileFloorPlanEditor({
       canvas_pos_y: pan.y
     };
 
+    setSavedSnapshot(JSON.stringify(floors));
     setSaveToast(true);
     setTimeout(() => {
       setSaveToast(false);
-      if (onSave) onSave(payload);
+      if (onSave) onSave(payload, andClose);
+      if (andClose && onClose) {
+        onClose();
+      }
     }, 500);
   };
 
@@ -1166,6 +1201,36 @@ export default function MobileFloorPlanEditor({
             padding: 6px 14px !important;
             font-size: 12px !important;
           }
+
+          /* 11. MODAL DE SALIDA EN APAISADO */
+          .mfp-exit-modal-overlay {
+            align-items: center !important;
+            justify-content: center !important;
+            padding: 10px !important;
+          }
+          .mfp-exit-modal-card {
+            border-radius: 20px !important;
+            max-width: 460px !important;
+            width: 92% !important;
+            padding: 16px 20px !important;
+            gap: 12px !important;
+            animation: mfpFadeIn 0.2s ease-out !important;
+          }
+        }
+
+        @keyframes mfpFadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes mfpSlideUp {
+          from { transform: translateY(100%); }
+          to { transform: translateY(0); }
+        }
+        .mfp-exit-modal-overlay {
+          animation: mfpFadeIn 0.2s ease-out;
+        }
+        .mfp-exit-modal-card {
+          animation: mfpSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
         }
       `}</style>
 
@@ -1175,7 +1240,7 @@ export default function MobileFloorPlanEditor({
           type="button"
           className="mfp-top-back-btn"
           style={editorStyles.topBackBtn}
-          onClick={onClose}
+          onClick={handleAttemptClose}
           aria-label="Volver a la propiedad"
         >
           <ArrowLeft size={19} color="#0f172a" strokeWidth={2.4} />
@@ -1191,7 +1256,7 @@ export default function MobileFloorPlanEditor({
           type="button"
           className="mfp-top-save-btn"
           style={editorStyles.topSaveBtn}
-          onClick={handleSavePlan}
+          onClick={() => handleSavePlan(true)}
           aria-label="Guardar plano"
         >
           <Check size={16} strokeWidth={2.8} />
@@ -2357,6 +2422,75 @@ export default function MobileFloorPlanEditor({
           <span>¡Plano guardado exitosamente!</span>
         </div>
       )}
+
+      {/* ============ MODAL DE CONFIRMACIÓN: SALIR CON CAMBIOS SIN GUARDAR ============ */}
+      {showExitConfirmModal && (
+        <div
+          className="mfp-exit-modal-overlay"
+          style={editorStyles.exitModalOverlay}
+          onClick={() => setShowExitConfirmModal(false)}
+        >
+          <div
+            className="mfp-exit-modal-card"
+            style={editorStyles.exitModalCard}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Indicador de arrastre / Handle bar */}
+            <div style={editorStyles.sheetHandleBar} />
+
+            {/* Cabecera con Icono y Título */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '8px', paddingTop: '4px' }}>
+              <div style={editorStyles.exitModalIconWrap}>
+                <AlertTriangle size={24} color="#d97706" strokeWidth={2.4} />
+              </div>
+              <div>
+                <h3 style={editorStyles.exitModalTitle}>Cambios sin guardar</h3>
+                <p style={editorStyles.exitModalDesc}>
+                  Modificaste el plano de <strong>{propertyDisplayName}</strong>. Si salís ahora sin guardar, se perderán todas las modificaciones realizadas en esta sesión.
+                </p>
+              </div>
+            </div>
+
+            {/* Botones de Acción */}
+            <div style={editorStyles.exitModalActions}>
+              <button
+                type="button"
+                className="mfp-exit-save-btn"
+                style={editorStyles.exitModalSaveBtn}
+                onClick={() => {
+                  setShowExitConfirmModal(false);
+                  handleSavePlan(true);
+                }}
+              >
+                <Check size={17} strokeWidth={2.8} />
+                <span>Guardar y salir</span>
+              </button>
+
+              <button
+                type="button"
+                className="mfp-exit-discard-btn"
+                style={editorStyles.exitModalDiscardBtn}
+                onClick={() => {
+                  setShowExitConfirmModal(false);
+                  if (onClose) onClose();
+                }}
+              >
+                <Trash2 size={16} strokeWidth={2.2} />
+                <span>Salir sin guardar</span>
+              </button>
+
+              <button
+                type="button"
+                className="mfp-exit-cancel-btn"
+                style={editorStyles.exitModalCancelBtn}
+                onClick={() => setShowExitConfirmModal(false)}
+              >
+                <span>Seguir editando</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2963,5 +3097,104 @@ const editorStyles = {
     gap: '8px',
     boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
     zIndex: 1500,
+  },
+  exitModalOverlay: {
+    position: 'fixed',
+    inset: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    backdropFilter: 'blur(5px)',
+    WebkitBackdropFilter: 'blur(5px)',
+    zIndex: 1300,
+    display: 'flex',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    padding: 0,
+  },
+  exitModalCard: {
+    width: '100%',
+    maxWidth: '460px',
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: '24px',
+    borderTopRightRadius: '24px',
+    padding: '16px 20px calc(24px + env(safe-area-inset-bottom, 0px)) 20px',
+    boxShadow: '0 -10px 40px rgba(0, 0, 0, 0.2)',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+    boxSizing: 'border-box',
+  },
+  exitModalIconWrap: {
+    width: '48px',
+    height: '48px',
+    borderRadius: '14px',
+    backgroundColor: '#fef3c7',
+    border: '1px solid #fde68a',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exitModalTitle: {
+    fontSize: '17px',
+    fontWeight: '800',
+    color: '#0f172a',
+    margin: '0 0 6px 0',
+    letterSpacing: '-0.3px',
+  },
+  exitModalDesc: {
+    fontSize: '13.5px',
+    color: '#64748b',
+    lineHeight: '1.5',
+    margin: 0,
+  },
+  exitModalActions: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '9px',
+    marginTop: '4px',
+  },
+  exitModalSaveBtn: {
+    width: '100%',
+    height: '46px',
+    borderRadius: '14px',
+    backgroundColor: '#4f46e5',
+    color: '#ffffff',
+    border: 'none',
+    fontSize: '14px',
+    fontWeight: '700',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    cursor: 'pointer',
+    boxShadow: '0 4px 14px rgba(79, 70, 229, 0.35)',
+  },
+  exitModalDiscardBtn: {
+    width: '100%',
+    height: '44px',
+    borderRadius: '14px',
+    backgroundColor: '#fef2f2',
+    color: '#dc2626',
+    border: '1px solid #fecaca',
+    fontSize: '14px',
+    fontWeight: '700',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    cursor: 'pointer',
+  },
+  exitModalCancelBtn: {
+    width: '100%',
+    height: '42px',
+    borderRadius: '14px',
+    backgroundColor: '#f8fafc',
+    color: '#475569',
+    border: '1px solid #e2e8f0',
+    fontSize: '14px',
+    fontWeight: '600',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
   },
 };

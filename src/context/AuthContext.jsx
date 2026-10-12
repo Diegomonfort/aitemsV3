@@ -22,10 +22,20 @@ export function AuthProvider({ children }) {
       // 1. Consultar endpoint protegido del backend
       const res = await api.get('/api/users/profile');
 
+      if (res?.code === 'AGENT_PLAN_RESTRICTED' || (res?.status === 403 && res?.code === 'AGENT_PLAN_RESTRICTED')) {
+        await authService.signOut();
+        setUser(null);
+        setAgency(null);
+        setSession(null);
+        return { success: false, code: 'AGENT_PLAN_RESTRICTED', error: res.message };
+      }
+
       if (res.success && res.data?.user) {
         setUser(res.data.user);
         if (res.data.agency) {
           setAgency(res.data.agency);
+        } else {
+          setAgency(null);
         }
       } else {
         // Fallback si el backend está reiniciando o en proceso
@@ -33,8 +43,13 @@ export function AuthProvider({ children }) {
           id: sessionUser.id,
           email: sessionUser.email,
           name: sessionUser.user_metadata?.name || sessionUser.email?.split('@')[0] || 'Usuario',
-          role: sessionUser.user_metadata?.role || 'owner',
+          role: sessionUser.user_metadata?.role || sessionUser.user_metadata?.type || 'owner',
+          type: sessionUser.user_metadata?.type || sessionUser.user_metadata?.role || 'owner',
+          inmobiliaria_id: sessionUser.user_metadata?.inmobiliaria_id || null,
+          country: sessionUser.user_metadata?.country || 'Uruguay',
+          city: sessionUser.user_metadata?.city || 'Montevideo',
         });
+        setAgency(null);
       }
     } catch (err) {
       console.warn('Error sincronizando perfil con backend:', err);
@@ -42,8 +57,13 @@ export function AuthProvider({ children }) {
         id: sessionUser.id,
         email: sessionUser.email,
         name: sessionUser.user_metadata?.name || sessionUser.email?.split('@')[0] || 'Usuario',
-        role: sessionUser.user_metadata?.role || 'owner',
+        role: sessionUser.user_metadata?.role || sessionUser.user_metadata?.type || 'owner',
+        type: sessionUser.user_metadata?.type || sessionUser.user_metadata?.role || 'owner',
+        inmobiliaria_id: sessionUser.user_metadata?.inmobiliaria_id || null,
+        country: sessionUser.user_metadata?.country || 'Uruguay',
+        city: sessionUser.user_metadata?.city || 'Montevideo',
       });
+      setAgency(null);
     }
   }, []);
 
@@ -123,11 +143,39 @@ export function AuthProvider({ children }) {
     setIsLoading(false);
   };
 
-  const refreshProfile = async () => {
-    if (session?.user) {
-      await fetchUserProfile(session.user);
-    }
+  const resetPassword = async (email) => {
+    return await authService.resetPassword(email);
   };
+
+  const verifyRecoveryOtp = async (email, token) => {
+    return await authService.verifyRecoveryOtp(email, token);
+  };
+
+  const updatePassword = async (newPassword) => {
+    return await authService.updatePassword(newPassword);
+  };
+
+  const refreshProfile = useCallback(async () => {
+    try {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      if (currentSession?.user) {
+        await fetchUserProfile(currentSession.user);
+      }
+    } catch (err) {
+      console.warn('Error refrescando perfil:', err);
+    }
+  }, [fetchUserProfile]);
+
+  const verifySignupOtp = async (email, token) => {
+    return await authService.verifySignupOtp(email, token);
+  };
+
+  const resendSignupOtp = async (email) => {
+    return await authService.resendSignupOtp(email);
+  };
+
+  const isOwner = Boolean(user && (user.type === 'owner' || user.role === 'owner' || !user.type));
+  const needsInmobiliaria = Boolean(isOwner && !user?.inmobiliaria_id && !agency?.id);
 
   const value = {
     user,
@@ -137,10 +185,17 @@ export function AuthProvider({ children }) {
     session,
     isLoading,
     isAuthenticated: !!user,
+    isOwner,
+    needsInmobiliaria,
     signIn,
     signUp,
     signInWithGoogle,
     signOut,
+    resetPassword,
+    verifyRecoveryOtp,
+    updatePassword,
+    verifySignupOtp,
+    resendSignupOtp,
     refreshProfile,
   };
 
