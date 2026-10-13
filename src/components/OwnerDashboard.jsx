@@ -195,7 +195,7 @@ export default function OwnerDashboard({
       if (res && (res.success || res.invitation)) {
         toast.success(`Invitación enviada por email a ${cleanEmail}`);
         const code = res.code || res.invitation?.invitation_token || '';
-        const link = res.invitationLink || (code ? `https://aitems.app/accept-invitation?token=${code}` : '');
+        const link = res.invitationLink || (code ? `https://aitemsapp.com/accept-invitation?token=${code}` : '');
         setCreatedInviteCode(code);
         setCreatedInviteLink(link);
 

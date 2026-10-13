@@ -398,3 +398,12 @@ html.bs-scroll-lock .bs-body.bs-body-viewer,
   }
 }
 
+
+/* Modal de exportar PDF: el pie fijo maneja el safe-area, evitar doble padding inferior */
+.bs-sheet.bs-sheet-export {
+  padding-bottom: 0;
+}
+
+.bs-sheet.bs-sheet-export .bs-body {
+  padding-bottom: 0;
+}

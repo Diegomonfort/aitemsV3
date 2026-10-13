@@ -1,11 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from '../context/ToastContext';
 import { 
-  X, 
-  Calendar, 
-  Shield, 
-  UserCheck, 
-  Image as ImageIcon,
   Download,
   Copy,
   MessageCircle,
@@ -13,16 +8,10 @@ import {
   Loader2,
   AlertCircle,
   FileCheck,
-  Layers,
-  ArrowRight,
   Eye,
   RotateCcw,
-  ExternalLink,
-  ChevronLeft,
-  ArrowUpDown,
   ChevronUp,
   ChevronDown,
-  GripVertical
 } from 'lucide-react';
 import aitemsLogo from '../assets/logo-color.png';
 import logoAnda from '../assets/logoAnda.webp';
@@ -93,8 +82,9 @@ export default function ExportPdfModal({
   });
   const [includeFloorPlan, setIncludeFloorPlan] = useState(true);
 
-  // 6. Orden de los ambientes (categories.position)
+  // 6. Orden de los ambientes (categories.position) y paneles desplegables
   const [showRoomOrder, setShowRoomOrder] = useState(false);
+  const [showDatePanel, setShowDatePanel] = useState(false);
   const [orderedRooms, setOrderedRooms] = useState([]);
 
   // Sincronizar estado al abrir o cuando cambia de propiedad
@@ -102,6 +92,7 @@ export default function ExportPdfModal({
     if (!isOpen || !property) return;
 
     setShowRoomOrder(false);
+    setShowDatePanel(false);
     setErrorMessage('');
     setCopiedLink(false);
     setIsDownloading(false);
@@ -358,12 +349,20 @@ export default function ExportPdfModal({
     }
   };
 
+  const getPublicWebUrl = () => {
+    const origin = typeof window !== 'undefined' ? window.location?.origin : '';
+    // En Capacitor iOS/Android el origin es 'capacitor://localhost' o 'http://localhost'
+    if (!origin || origin.includes('localhost') || origin.includes('capacitor')) {
+      return 'https://aitemsapp.com';
+    }
+    return origin;
+  };
+
   // Acciones en la pantalla de opciones / éxito
   const getPdfViewerUrl = () => {
-    if (!pdfData?.pdf_id && !pdfData?.id) return '';
-    const id = pdfData.pdf_id || pdfData.id;
-    const origin = window.location.origin;
-    return `${origin}/pdf/${id}`;
+    const id = pdfData?.pdf_id || pdfData?.id || property?.pdf?.id || property?.pdf_id;
+    if (!id) return '';
+    return `${getPublicWebUrl()}/pdf/${id}`;
   };
 
   const handleDownload = async () => {
@@ -421,27 +420,29 @@ export default function ExportPdfModal({
 
   const selectedInsuranceObj = INSURANCE_OPTIONS.find(o => o.id === selectedInsurance);
   const hasExistingPdf = Boolean(pdfData?.pdf_url);
+  const roomsCount = orderedRooms.length;
+  const dateLabel = formatShortDate(dateOption === 'custom' ? customDate : lastUpdateDate);
 
-  // Título y subtítulo dinámico según paso
-  let sheetTitle = 'Exportar Inventario';
+  // Título y subtítulo según paso
+  let sheetTitle = 'Exportar PDF';
   let sheetSubtitle = property.name;
 
   if (step === 'actions') {
-    sheetTitle = 'Inventario Oficial (PDF)';
-    sheetSubtitle = `${property.name} — Documento listo para consultar`;
+    sheetTitle = 'PDF del inventario';
   } else if (step === 'viewer') {
-    sheetTitle = 'Visor de Inventario';
-    sheetSubtitle = property.name;
+    sheetTitle = 'Visor de inventario';
   } else if (step === 'config') {
-    sheetTitle = hasExistingPdf ? 'Rehacer Inventario (PDF)' : 'Exportar Inventario (PDF)';
-    sheetSubtitle = hasExistingPdf ? 'Modificá opciones y generá una nueva versión' : property.name;
+    sheetTitle = hasExistingPdf ? 'Rehacer PDF' : 'Exportar PDF';
   } else if (step === 'generating') {
-    sheetTitle = 'Generando documento';
-    sheetSubtitle = 'Renderizando versión oficial';
+    sheetTitle = 'Generando PDF';
   } else if (step === 'error') {
     sheetTitle = 'Error al exportar';
     sheetSubtitle = 'Ocurrió un problema';
   }
+
+  const insuranceHint = selectedInsuranceObj
+    ? `El PDF usará el formato oficial de ${selectedInsuranceObj.name}.`
+    : 'Formato estándar, sin garantía de alquiler.';
 
   return (
     <BottomSheet
@@ -450,183 +451,91 @@ export default function ExportPdfModal({
       title={sheetTitle}
       subtitle={sheetSubtitle}
       size="full"
-      className={step === 'viewer' ? 'bs-sheet-viewer' : ''}
+      className={step === 'viewer' ? 'bs-sheet-export bs-sheet-viewer' : 'bs-sheet-export'}
       bodyClassName={step === 'viewer' ? 'bs-body-viewer' : ''}
       showBackButton={step === 'viewer' || (step === 'config' && hasExistingPdf)}
       onBack={() => setStep('actions')}
-      backLabel="Volver a opciones"
+      backLabel="Volver"
     >
-      <div 
-        className="export-pdf-body no-scrollbar" 
+      <div
+        className="export-pdf-body no-scrollbar"
         style={{
           ...styles.body,
           ...(step === 'viewer' ? styles.viewerBodyWrapper : {}),
+          ...(step === 'config' ? styles.configBody : {}),
         }}
       >
 
-        {/* ── PASO 1: ACCIONES DISPONIBLES CUANDO YA EXISTE PDF (O TRAS GENERARLO) ── */}
+        {/* ── PASO 1: PDF LISTO — ACCIONES ── */}
         {step === 'actions' && pdfData && (
           <div style={styles.actionsContainer}>
-            
-            {/* Tarjeta de estado del documento */}
-            <div style={styles.documentStatusCard}>
-              <div style={styles.docStatusTop}>
-                <div style={styles.docStatusBadge}>
-                  <FileCheck size={14} color="#16a34a" strokeWidth={2.5} />
-                  <span>Documento oficial disponible</span>
-                </div>
-                {pdfData.updated_at && (
-                  <span style={styles.docStatusDate}>
-                    {formatShortDate(pdfData.updated_at)}
-                  </span>
-                )}
-              </div>
 
-              {selectedInsuranceObj && (
-                <div style={styles.insurancePillRow}>
-                  <img 
-                    src={selectedInsuranceObj.logo} 
-                    alt={selectedInsuranceObj.name} 
-                    style={{ height: 16, objectFit: 'contain' }} 
-                  />
-                  <span style={styles.insurancePillText}>
-                    Formato oficial {selectedInsuranceObj.label}
-                  </span>
-                </div>
-              )}
+            <div style={styles.readyHero}>
+              <div style={styles.readyIcon}>
+                <FileCheck size={26} color="#16a34a" strokeWidth={2.2} />
+              </div>
+              <div style={styles.readyTitle}>Tu PDF está listo</div>
+              <div style={styles.readyMeta}>
+                {pdfData.updated_at ? `Generado el ${formatShortDate(pdfData.updated_at)}` : 'Documento oficial del inventario'}
+                {selectedInsuranceObj ? ` · ${selectedInsuranceObj.name}` : ''}
+              </div>
             </div>
 
-            {/* Listado de 5 opciones principales adaptadas a mobile */}
-            <div style={styles.actionsList}>
-              
-              {/* 1. VER INVENTARIO OFICIAL */}
-              <button 
-                type="button"
-                onClick={() => setStep('viewer')}
-                style={styles.actionBtn}
-              >
-                <div style={{ ...styles.actionIconBox, backgroundColor: '#eff6ff', color: '#2563eb' }}>
-                  <Eye size={20} strokeWidth={2.3} />
-                </div>
-                <div style={styles.actionTextBox}>
-                  <strong style={styles.actionTitle}>Ver inventario oficial</strong>
-                  <span style={styles.actionDesc}>Visualizar el documento completo en el visor interactivo</span>
-                </div>
-                <ArrowRight size={16} color="#94a3b8" style={{ marginLeft: 'auto', flexShrink: 0 }} />
-              </button>
+            <button type="button" onClick={() => setStep('viewer')} style={styles.primaryBtn}>
+              <Eye size={19} strokeWidth={2.2} />
+              <span>Ver PDF</span>
+            </button>
 
-              {/* 2. DESCARGAR PDF */}
-              <button 
-                type="button"
-                onClick={handleDownload}
-                disabled={isDownloading}
-                style={styles.actionBtn}
-              >
-                <div style={{ ...styles.actionIconBox, backgroundColor: '#f0fdf4', color: '#16a34a' }}>
+            <div style={styles.tileGrid}>
+              <button type="button" onClick={handleDownload} disabled={isDownloading} style={styles.tile}>
+                <div style={{ ...styles.tileIcon, backgroundColor: '#eff6ff', color: '#2563eb' }}>
                   {isDownloading ? (
                     <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
                   ) : (
-                    <Download size={20} strokeWidth={2.3} />
+                    <Download size={20} strokeWidth={2.2} />
                   )}
                 </div>
-                <div style={styles.actionTextBox}>
-                  <strong style={styles.actionTitle}>Descargar archivo PDF</strong>
-                  <span style={styles.actionDesc}>Guardar copia del documento en tu dispositivo</span>
-                </div>
-                <ArrowRight size={16} color="#94a3b8" style={{ marginLeft: 'auto', flexShrink: 0 }} />
+                <span style={styles.tileLabel}>Descargar</span>
               </button>
 
-              {/* 3. COPIAR LINK PÚBLICO */}
-              <button 
+              <button
                 type="button"
                 onClick={handleCopyLink}
                 style={{
-                  ...styles.actionBtn,
-                  borderColor: copiedLink ? '#16a34a' : '#e2e8f0',
+                  ...styles.tile,
+                  borderColor: copiedLink ? '#86efac' : '#e8ecf1',
                   backgroundColor: copiedLink ? '#f0fdf4' : '#ffffff',
                 }}
               >
-                <div style={{ 
-                  ...styles.actionIconBox, 
-                  backgroundColor: copiedLink ? '#dcfce7' : '#f8fafc',
-                  color: copiedLink ? '#16a34a' : '#0f172a'
+                <div style={{
+                  ...styles.tileIcon,
+                  backgroundColor: copiedLink ? '#dcfce7' : '#f1f5f9',
+                  color: copiedLink ? '#16a34a' : '#0f172a',
                 }}>
-                  {copiedLink ? (
-                    <Check size={20} strokeWidth={3} />
-                  ) : (
-                    <Copy size={20} strokeWidth={2.2} />
-                  )}
+                  {copiedLink ? <Check size={20} strokeWidth={3} /> : <Copy size={20} strokeWidth={2.2} />}
                 </div>
-                <div style={styles.actionTextBox}>
-                  <strong style={{ 
-                    ...styles.actionTitle, 
-                    color: copiedLink ? '#16a34a' : '#0f172a' 
-                  }}>
-                    {copiedLink ? '¡Enlace copiado!' : 'Copiar enlace de acceso'}
-                  </strong>
-                  <span style={{ 
-                    ...styles.actionDesc, 
-                    color: copiedLink ? '#15803d' : '#64748b' 
-                  }}>
-                    {copiedLink ? 'Enlace copiado al portapapeles' : 'Compartir enlace para visualización directa'}
-                  </span>
-                </div>
-                <ArrowRight size={16} color={copiedLink ? '#16a34a' : '#94a3b8'} style={{ marginLeft: 'auto', flexShrink: 0 }} />
+                <span style={{ ...styles.tileLabel, color: copiedLink ? '#16a34a' : '#0f172a' }}>
+                  {copiedLink ? '¡Copiado!' : 'Copiar link'}
+                </span>
               </button>
 
-              {/* 4. ENVIAR POR WHATSAPP */}
-              <button 
-                type="button"
-                onClick={handleWhatsApp}
-                style={styles.actionBtn}
-              >
-                <div style={{ ...styles.actionIconBox, backgroundColor: '#ecfdf5', color: '#10b981' }}>
-                  <MessageCircle size={20} strokeWidth={2.3} />
+              <button type="button" onClick={handleWhatsApp} style={styles.tile}>
+                <div style={{ ...styles.tileIcon, backgroundColor: '#ecfdf5', color: '#059669' }}>
+                  <MessageCircle size={20} strokeWidth={2.2} />
                 </div>
-                <div style={styles.actionTextBox}>
-                  <strong style={styles.actionTitle}>Enviar por WhatsApp</strong>
-                  <span style={styles.actionDesc}>Compartir con propietarios o inquilinos</span>
-                </div>
-                <ArrowRight size={16} color="#94a3b8" style={{ marginLeft: 'auto', flexShrink: 0 }} />
-              </button>
-
-              {/* 5. VOLVER A GENERAR (REHACER) */}
-              <button 
-                type="button"
-                onClick={() => setStep('config')}
-                style={{
-                  ...styles.actionBtn,
-                  backgroundColor: '#fffdf5',
-                  borderColor: '#fef08a'
-                }}
-              >
-                <div style={{ ...styles.actionIconBox, backgroundColor: '#fef9c3', color: '#ca8a04' }}>
-                  <RotateCcw size={19} strokeWidth={2.3} />
-                </div>
-                <div style={styles.actionTextBox}>
-                  <strong style={styles.actionTitle}>Volver a generar / Rehacer</strong>
-                  <span style={styles.actionDesc}>Modificar opciones y crear una nueva versión del acta</span>
-                </div>
-                <ArrowRight size={16} color="#ca8a04" style={{ marginLeft: 'auto', flexShrink: 0 }} />
-              </button>
-
-            </div>
-
-            {/* Botón de cierre inferior */}
-            <div style={{ marginTop: 10 }}>
-              <button 
-                type="button" 
-                onClick={onClose}
-                style={styles.doneBtn}
-              >
-                Cerrar
+                <span style={styles.tileLabel}>WhatsApp</span>
               </button>
             </div>
+
+            <button type="button" onClick={() => setStep('config')} style={styles.linkBtn}>
+              <RotateCcw size={15} strokeWidth={2.3} />
+              <span>Rehacer PDF con otros datos</span>
+            </button>
 
           </div>
         )}
 
-        {/* ── PASO 2: VISOR INTERACTIVO EN MOBILE (CANVAS RETINA AUTO-FIT) ── */}
+        {/* ── PASO 2: VISOR INTERACTIVO ── */}
         {step === 'viewer' && pdfData && (
           <MobilePdfCanvasViewer
             pdfUrl={pdfData.pdf_url}
@@ -640,378 +549,84 @@ export default function ExportPdfModal({
           />
         )}
 
-        {/* ── PASO 3: CONFIGURACIÓN DE PARÁMETROS PARA GENERAR O REHACER ── */}
+        {/* ── PASO 3: CONFIGURACIÓN ── */}
         {step === 'config' && (
-          <div style={styles.formContainer}>
+          <>
+            <div style={styles.configScroll}>
 
-            {/* Aviso si ya existe PDF */}
-            {hasExistingPdf && (
-              <div style={styles.reGenerateNotice}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <RotateCcw size={16} color="#854d0e" />
-                  <strong style={{ fontSize: 13, color: '#854d0e' }}>
-                    Rehacer inventario
-                  </strong>
-                </div>
-                <p style={{ margin: '4px 0 0 0', fontSize: 12, color: '#a16207', lineHeight: 1.4 }}>
-                  Al generar, se sobrescribirá el PDF anterior con los nuevos datos que configures aquí.
-                </p>
-              </div>
-            )}
-            
-            {/* 1. SECCIÓN: SEGURO DE ALQUILER */}
-            <div style={styles.fieldCard}>
-              <div style={styles.fieldHeaderBetween}>
-                <div style={styles.fieldHeader}>
-                  <div style={styles.iconCircle}>
-                    <Shield size={16} color="#0f172a" />
-                  </div>
-                  <div>
-                    <span style={styles.fieldLabel}>Seguro de alquiler</span>
-                    <span style={styles.fieldSubLabel}>Elegí una garantía o desmarcala para inventario estándar</span>
-                  </div>
-                </div>
-                <span style={{
-                  ...styles.statusBadgeSmall,
-                  backgroundColor: selectedInsurance ? '#0f172a' : '#f1f5f9',
-                  color: selectedInsurance ? '#ffffff' : '#64748b',
-                }}>
-                  {selectedInsurance ? (selectedInsurance === 'anda' ? 'ANDA' : 'Sancor') : 'Estándar'}
-                </span>
-              </div>
-
-              <div style={styles.insuranceRow}>
-                {INSURANCE_OPTIONS.map((opt) => {
+              {/* 1. Tipo de documento (seguro) */}
+              <SectionLabel>Tipo de documento</SectionLabel>
+              <div style={styles.segmented}>
+                {[{ id: null, name: 'Estándar' }, ...INSURANCE_OPTIONS].map((opt) => {
                   const isSelected = selectedInsurance === opt.id;
                   return (
-                    <div 
-                      key={opt.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => toggleInsurance(opt.id)}
+                    <button
+                      key={opt.id || 'none'}
+                      type="button"
+                      onClick={() => setSelectedInsurance(opt.id)}
                       style={{
-                        ...styles.insuranceCard,
-                        ...(isSelected ? styles.insuranceCardActive : styles.insuranceCardInactive)
+                        ...styles.segment,
+                        ...(isSelected ? styles.segmentActive : {}),
                       }}
                     >
-                      {isSelected && (
-                        <div style={styles.cardCheckCircle}>
-                          <Check size={11} strokeWidth={3.5} color="#ffffff" />
-                        </div>
-                      )}
-                      
-                      <div style={styles.logoWrap}>
-                        <img 
-                          src={opt.logo} 
-                          alt={opt.name} 
-                          style={styles.insuranceImg}
+                      {opt.logo ? (
+                        <img
+                          src={opt.logo}
+                          alt={opt.name}
+                          style={{ ...styles.segmentLogo, opacity: isSelected ? 1 : 0.5 }}
                         />
-                      </div>
-
-                      <span style={{
-                        ...styles.cardLabel,
-                        color: isSelected ? '#0f172a' : '#64748b',
-                        fontWeight: isSelected ? '700' : '600',
-                      }}>
-                        {opt.label}
-                      </span>
-
-                      <div style={{
-                        ...styles.statusPill,
-                        backgroundColor: isSelected ? '#0f172a' : '#f1f5f9',
-                        color: isSelected ? '#ffffff' : '#64748b',
-                      }}>
-                        {isSelected ? 'Seleccionado' : 'Tocar para elegir'}
-                      </div>
-                    </div>
+                      ) : (
+                        <span style={{ ...styles.segmentText, color: isSelected ? '#0f172a' : '#64748b' }}>
+                          {opt.name}
+                        </span>
+                      )}
+                    </button>
                   );
                 })}
               </div>
-            </div>
+              <p style={styles.hintText}>{insuranceHint}</p>
 
-            {/* 2. SECCIÓN: ORDEN DE LOS AMBIENTES (NUEVO - como en Desktop 3) */}
-            <div style={styles.fieldCard}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
-                  <div style={styles.iconCircle}>
-                    <ArrowUpDown size={16} color="#0f172a" />
-                  </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={styles.fieldLabel}>Orden de los ambientes</span>
-                      {orderedRooms.length > 0 && (
-                        <span style={styles.roomsCountBadge}>
-                          {orderedRooms.length}
-                        </span>
-                      )}
-                    </div>
-                    <span style={styles.fieldSubLabel}>
-                      {showRoomOrder
-                        ? 'Usá las flechas para ordenar qué ambientes van primero'
-                        : 'Personalizar qué ambientes aparecen primero en el PDF'}
-                    </span>
-                  </div>
+              {/* 2. Qué incluir */}
+              <SectionLabel>Incluir en el PDF</SectionLabel>
+              <div style={styles.listGroup}>
+                <div style={styles.listRow}>
+                  <span style={styles.rowTitle}>Logo</span>
+                  <Toggle checked={includeLogo} onChange={setIncludeLogo} label="Incluir logo" />
                 </div>
 
-                <label style={styles.switchContainer} title="Mostrar / ocultar reordenador de ambientes">
-                  <input 
-                    type="checkbox" 
-                    checked={showRoomOrder} 
-                    onChange={(e) => setShowRoomOrder(e.target.checked)}
-                    style={styles.hiddenCheckbox}
-                  />
-                  <span style={{
-                    ...styles.switchTrack,
-                    backgroundColor: showRoomOrder ? '#0f172a' : '#e2e8f0'
-                  }}>
-                    <span style={{
-                      ...styles.switchThumb,
-                      transform: showRoomOrder ? 'translateX(16px)' : 'translateX(0px)'
-                    }} />
-                  </span>
-                </label>
-              </div>
-
-              {/* Si está colapsado, mostrar un resumen visual rápido del orden actual */}
-              {!showRoomOrder && orderedRooms.length > 0 && (
-                <div style={styles.roomsSummaryBox}>
-                  <div style={styles.roomsPillList}>
-                    {orderedRooms.slice(0, 5).map((r, i) => (
-                      <span key={r.id || i} style={styles.roomsSummaryPill}>
-                        <span style={{ color: '#94a3b8', marginRight: 4, fontWeight: 700 }}>{i + 1}</span>
-                        {r.name}
-                      </span>
-                    ))}
-                    {orderedRooms.length > 5 && (
-                      <span style={styles.roomsSummaryMore}>
-                        +{orderedRooms.length - 5} más
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Si está expandido, mostrar lista interactiva con flechas de ordenación */}
-              {showRoomOrder && (
-                <div style={{ marginTop: 6, paddingTop: 8, borderTop: '1px solid #f1f5f9' }}>
-                  {orderedRooms.length === 0 ? (
-                    <div style={styles.emptyRoomsBox}>
-                      No se encontraron ambientes registrados en esta propiedad
+                {hasFloorPlan && (
+                  <div style={{ ...styles.listRow, ...styles.listRowDivider }}>
+                    <div style={styles.rowTextBox}>
+                      <span style={styles.rowTitle}>Plano de distribución</span>
+                      <span style={styles.rowHint}>Con código QR</span>
                     </div>
-                  ) : (
-                    <div style={styles.roomsListContainer}>
-                      {orderedRooms.map((room, idx) => (
-                        <div
-                          key={room.id || `room-${idx}-${room.name}`}
-                          style={styles.roomRow}
-                        >
-                          <div style={styles.roomPositionPill}>
-                            {idx + 1}
-                          </div>
-
-                          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={styles.roomNameText}>{room.name}</span>
-                            {room.itemsCount !== undefined && room.itemsCount !== null && (
-                              <span style={styles.roomItemsBadge}>
-                                {room.itemsCount} {room.itemsCount === 1 ? 'ítem' : 'ítems'}
-                              </span>
-                            )}
-                          </div>
-
-                          <div style={styles.roomOrderButtons}>
-                            <button
-                              type="button"
-                              disabled={idx === 0}
-                              onClick={() => handleMoveRoom(idx, -1)}
-                              title="Subir de posición"
-                              style={{
-                                ...styles.orderArrowBtn,
-                                ...(idx === 0 ? styles.orderArrowBtnDisabled : {})
-                              }}
-                            >
-                              <ChevronUp size={16} />
-                            </button>
-                            <button
-                              type="button"
-                              disabled={idx === orderedRooms.length - 1}
-                              onClick={() => handleMoveRoom(idx, 1)}
-                              title="Bajar de posición"
-                              style={{
-                                ...styles.orderArrowBtn,
-                                ...(idx === orderedRooms.length - 1 ? styles.orderArrowBtnDisabled : {})
-                              }}
-                            >
-                              <ChevronDown size={16} />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* 3. SECCIÓN: OPCIONES DE DOCUMENTO (Agrupadas limpiamente estilo tarjeta) */}
-            <div style={styles.settingsGroupCard}>
-
-              {/* Fecha del documento */}
-              <div style={styles.settingsGroupItem}>
-                <div style={styles.rowLeft}>
-                  <div style={styles.iconCircle}>
-                    <Calendar size={16} color="#0f172a" />
+                    <Toggle checked={includeFloorPlan} onChange={setIncludeFloorPlan} label="Incluir plano" />
                   </div>
-                  <div>
-                    <span style={styles.fieldLabel}>Fecha del documento</span>
-                    <span style={styles.fieldSubLabel}>Encabezado oficial del reporte</span>
-                  </div>
-                </div>
+                )}
 
-                <div style={{ width: '100%', marginTop: 8 }}>
-                  <select 
-                    value={dateOption}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setDateOption(val);
-                      if (val === 'updated') {
-                        setCustomDate(lastUpdateDate);
-                      }
-                    }}
-                    style={styles.selectInput}
-                  >
-                    <option value="updated">Última actualización ({formatShortDate(lastUpdateDate)})</option>
-                    <option value="custom">Elegir otra fecha...</option>
-                  </select>
-
-                  {dateOption === 'custom' && (
-                    <input 
-                      type="date" 
-                      value={customDate} 
-                      onChange={(e) => setCustomDate(e.target.value)}
-                      style={{ ...styles.dateInput, marginTop: 6 }}
-                    />
-                  )}
-                </div>
-              </div>
-
-              <div style={styles.settingsGroupDivider} />
-
-              {/* Incluir Logo */}
-              <div style={styles.settingsGroupRow}>
-                <div style={styles.rowLeft}>
-                  <div style={styles.iconCircle}>
-                    <ImageIcon size={16} color="#0f172a" />
-                  </div>
-                  <div>
-                    <span style={styles.fieldLabel}>Incluir logo</span>
-                    <span style={styles.fieldSubLabel}>Muestra el logo de la inmobiliaria o de Aitems</span>
-                  </div>
-                </div>
-                <label style={styles.switchContainer}>
-                  <input 
-                    type="checkbox" 
-                    checked={includeLogo} 
-                    onChange={(e) => setIncludeLogo(e.target.checked)}
-                    style={styles.hiddenCheckbox}
-                  />
-                  <span style={{
-                    ...styles.switchTrack,
-                    backgroundColor: includeLogo ? '#0f172a' : '#e2e8f0'
-                  }}>
-                    <span style={{
-                      ...styles.switchThumb,
-                      transform: includeLogo ? 'translateX(16px)' : 'translateX(0px)'
-                    }} />
-                  </span>
-                </label>
-              </div>
-
-              {/* Plano de Distribución (si tiene) */}
-              {hasFloorPlan && (
-                <>
-                  <div style={styles.settingsGroupDivider} />
-                  <div style={styles.settingsGroupRow}>
-                    <div style={styles.rowLeft}>
-                      <div style={styles.iconCircle}>
-                        <Layers size={16} color="#0f172a" />
-                      </div>
-                      <div>
-                        <span style={styles.fieldLabel}>Plano de distribución</span>
-                        <span style={styles.fieldSubLabel}>Incluir plano y código QR en el PDF</span>
-                      </div>
-                    </div>
-                    <label style={styles.switchContainer}>
-                      <input 
-                        type="checkbox" 
-                        checked={includeFloorPlan} 
-                        onChange={(e) => setIncludeFloorPlan(e.target.checked)}
-                        style={styles.hiddenCheckbox}
-                      />
-                      <span style={{
-                        ...styles.switchTrack,
-                        backgroundColor: includeFloorPlan ? '#0f172a' : '#e2e8f0'
-                      }}>
-                        <span style={{
-                          ...styles.switchThumb,
-                          transform: includeFloorPlan ? 'translateX(16px)' : 'translateX(0px)'
-                        }} />
-                      </span>
-                    </label>
-                  </div>
-                </>
-              )}
-
-              <div style={styles.settingsGroupDivider} />
-
-              {/* Incluir Firmas */}
-              <div style={{ ...styles.settingsGroupItem, paddingBottom: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                  <div style={styles.rowLeft}>
-                    <div style={styles.iconCircle}>
-                      <UserCheck size={16} color="#0f172a" />
-                    </div>
-                    <div>
-                      <span style={styles.fieldLabel}>Incluir firmas</span>
-                      <span style={styles.fieldSubLabel}>Arrendatario y arrendador al pie del documento</span>
-                    </div>
-                  </div>
-                  <label style={styles.switchContainer}>
-                    <input 
-                      type="checkbox" 
-                      checked={includeSignatures} 
-                      onChange={(e) => setIncludeSignatures(e.target.checked)}
-                      style={styles.hiddenCheckbox}
-                    />
-                    <span style={{
-                      ...styles.switchTrack,
-                      backgroundColor: includeSignatures ? '#0f172a' : '#e2e8f0'
-                    }}>
-                      <span style={{
-                        ...styles.switchThumb,
-                        transform: includeSignatures ? 'translateX(16px)' : 'translateX(0px)'
-                      }} />
-                    </span>
-                  </label>
+                <div style={{ ...styles.listRow, ...styles.listRowDivider }}>
+                  <span style={styles.rowTitle}>Firmas</span>
+                  <Toggle checked={includeSignatures} onChange={setIncludeSignatures} label="Incluir firmas" />
                 </div>
 
                 {includeSignatures && (
-                  <div style={styles.signaturesContainer}>
+                  <div style={styles.expandBox}>
                     <div style={styles.inputGroup}>
-                      <label style={styles.inputLabel}>Arrendador / Propietario</label>
-                      <input 
-                        type="text" 
-                        placeholder="Nombre completo..." 
-                        value={landlordName} 
+                      <label style={styles.inputLabel}>Propietario / Arrendador</label>
+                      <input
+                        type="text"
+                        placeholder="Nombre completo"
+                        value={landlordName}
                         onChange={(e) => setLandlordName(e.target.value)}
                         style={styles.textInput}
                       />
                     </div>
                     <div style={styles.inputGroup}>
-                      <label style={styles.inputLabel}>Arrendatario / Inquilino</label>
-                      <input 
-                        type="text" 
-                        placeholder="Nombre completo..." 
-                        value={tenantName} 
+                      <label style={styles.inputLabel}>Inquilino / Arrendatario</label>
+                      <input
+                        type="text"
+                        placeholder="Nombre completo"
+                        value={tenantName}
                         onChange={(e) => setTenantName(e.target.value)}
                         style={styles.textInput}
                       />
@@ -1020,49 +635,138 @@ export default function ExportPdfModal({
                 )}
               </div>
 
-            </div>
+              {/* 3. Personalizar */}
+              <SectionLabel>Personalizar</SectionLabel>
+              <div style={styles.listGroup}>
+                {/* Fecha */}
+                <button
+                  type="button"
+                  onClick={() => setShowDatePanel((v) => !v)}
+                  style={styles.listRowBtn}
+                >
+                  <span style={styles.rowTitle}>Fecha del documento</span>
+                  <span style={styles.rowValue}>
+                    <span>{dateLabel}</span>
+                    {showDatePanel ? <ChevronUp size={18} color="#94a3b8" /> : <ChevronDown size={18} color="#94a3b8" />}
+                  </span>
+                </button>
 
-            {/* 4. BOTÓN PRINCIPAL */}
-            <div style={{ marginTop: 6, marginBottom: 8 }}>
-              <button 
-                type="button" 
-                onClick={handleGeneratePdf}
-                style={{
-                  ...styles.generateBtn,
-                  backgroundColor: hasExistingPdf ? '#0f172a' : '#4f46e5',
-                }}
-              >
-                {hasExistingPdf ? (
-                  <>
-                    <RotateCcw size={18} />
-                    <span>Re-generar PDF Oficial</span>
-                  </>
-                ) : (
-                  <>
-                    <FileCheck size={18} />
-                    <span>Generar PDF de Inventario</span>
-                  </>
+                {showDatePanel && (
+                  <div style={styles.expandBox}>
+                    <button
+                      type="button"
+                      onClick={() => { setDateOption('updated'); setCustomDate(lastUpdateDate); }}
+                      style={styles.radioRow}
+                    >
+                      <span style={{ ...styles.radioDot, ...(dateOption === 'updated' ? styles.radioDotActive : {}) }}>
+                        {dateOption === 'updated' && <span style={styles.radioDotInner} />}
+                      </span>
+                      <span style={styles.radioText}>Última actualización ({formatShortDate(lastUpdateDate)})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDateOption('custom')}
+                      style={styles.radioRow}
+                    >
+                      <span style={{ ...styles.radioDot, ...(dateOption === 'custom' ? styles.radioDotActive : {}) }}>
+                        {dateOption === 'custom' && <span style={styles.radioDotInner} />}
+                      </span>
+                      <span style={styles.radioText}>Elegir otra fecha</span>
+                    </button>
+                    {dateOption === 'custom' && (
+                      <input
+                        type="date"
+                        value={customDate}
+                        onChange={(e) => setCustomDate(e.target.value)}
+                        style={styles.dateInput}
+                      />
+                    )}
+                  </div>
                 )}
-              </button>
+
+                {/* Orden de ambientes */}
+                <button
+                  type="button"
+                  onClick={() => setShowRoomOrder((v) => !v)}
+                  style={{ ...styles.listRowBtn, ...styles.listRowDivider }}
+                >
+                  <span style={styles.rowTitle}>Orden de ambientes</span>
+                  <span style={styles.rowValue}>
+                    <span>{roomsCount} {roomsCount === 1 ? 'ambiente' : 'ambientes'}</span>
+                    {showRoomOrder ? <ChevronUp size={18} color="#94a3b8" /> : <ChevronDown size={18} color="#94a3b8" />}
+                  </span>
+                </button>
+
+                {showRoomOrder && (
+                  <div style={styles.expandBox}>
+                    {roomsCount === 0 ? (
+                      <div style={styles.emptyRoomsBox}>Esta propiedad todavía no tiene ambientes</div>
+                    ) : (
+                      <>
+                        <p style={{ ...styles.hintText, margin: '0 0 8px 0' }}>
+                          Usá las flechas para elegir qué ambiente va primero.
+                        </p>
+                        <div style={styles.roomsListContainer}>
+                          {orderedRooms.map((room, idx) => (
+                            <div key={room.id || `room-${idx}-${room.name}`} style={styles.roomRow}>
+                              <span style={styles.roomPositionPill}>{idx + 1}</span>
+                              <span style={styles.roomNameText}>{room.name}</span>
+                              <div style={styles.roomOrderButtons}>
+                                <button
+                                  type="button"
+                                  disabled={idx === 0}
+                                  onClick={() => handleMoveRoom(idx, -1)}
+                                  aria-label="Subir"
+                                  style={{ ...styles.orderArrowBtn, ...(idx === 0 ? styles.orderArrowBtnDisabled : {}) }}
+                                >
+                                  <ChevronUp size={18} />
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={idx === roomsCount - 1}
+                                  onClick={() => handleMoveRoom(idx, 1)}
+                                  aria-label="Bajar"
+                                  style={{ ...styles.orderArrowBtn, ...(idx === roomsCount - 1 ? styles.orderArrowBtnDisabled : {}) }}
+                                >
+                                  <ChevronDown size={18} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
             </div>
 
-          </div>
+            {/* Pie fijo con la acción principal */}
+            <div style={styles.stickyFooter}>
+              <button type="button" onClick={handleGeneratePdf} style={styles.primaryBtn}>
+                <FileCheck size={19} strokeWidth={2.2} />
+                <span>{hasExistingPdf ? 'Generar nuevo PDF' : 'Generar PDF'}</span>
+              </button>
+              {hasExistingPdf && (
+                <p style={styles.footerNote}>Reemplazará el PDF anterior</p>
+              )}
+            </div>
+          </>
         )}
 
-        {/* ── PASO 4: ESTADO DE CARGA ── */}
+        {/* ── PASO 4: GENERANDO ── */}
         {step === 'generating' && (
           <div style={styles.loadingBox}>
             <div style={styles.spinnerCircle}>
-              <Loader2 size={32} color="#0f172a" style={{ animation: 'spin 1s linear infinite' }} />
+              <Loader2 size={32} color="#4f46e5" style={{ animation: 'spin 1s linear infinite' }} />
             </div>
-            <h4 style={styles.loadingTitle}>Generando documento...</h4>
-            <p style={styles.loadingSub}>
-              Renderizando el PDF oficial con Puppeteer. Un momento por favor.
-            </p>
+            <h4 style={styles.loadingTitle}>Generando tu PDF…</h4>
+            <p style={styles.loadingSub}>Esto puede tardar unos segundos. No cierres la app.</p>
           </div>
         )}
 
-        {/* ── PASO 5: ESTADO DE ERROR ── */}
+        {/* ── PASO 5: ERROR ── */}
         {step === 'error' && (
           <div style={styles.errorBox}>
             <div style={styles.errorIconCircle}>
@@ -1071,18 +775,10 @@ export default function ExportPdfModal({
             <h4 style={styles.errorTitle}>No se pudo generar el PDF</h4>
             <p style={styles.errorDesc}>{errorMessage}</p>
             <div style={{ display: 'flex', gap: 10, width: '100%', marginTop: 8 }}>
-              <button 
-                type="button" 
-                onClick={() => setStep('config')}
-                style={styles.retryBtn}
-              >
+              <button type="button" onClick={() => setStep('config')} style={styles.retryBtn}>
                 Reintentar
               </button>
-              <button 
-                type="button" 
-                onClick={onClose}
-                style={styles.cancelBtn}
-              >
+              <button type="button" onClick={onClose} style={styles.cancelBtn}>
                 Cerrar
               </button>
             </div>
@@ -1094,9 +790,38 @@ export default function ExportPdfModal({
   );
 }
 
+// ── Componentes auxiliares ──────────────────────────────────────────────
+
+function SectionLabel({ children }) {
+  return <div style={styles.sectionLabel}>{children}</div>;
+}
+
+function Toggle({ checked, onChange, label }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      style={{
+        ...styles.switchTrack,
+        backgroundColor: checked ? '#4f46e5' : '#d7dde5',
+      }}
+    >
+      <span
+        style={{
+          ...styles.switchThumb,
+          transform: checked ? 'translateX(19px)' : 'translateX(0px)',
+        }}
+      />
+    </button>
+  );
+}
+
 const styles = {
   body: {
-    padding: '8px 12px 28px 12px',
+    padding: '4px 0 calc(16px + env(safe-area-inset-bottom, 0px)) 0',
     overflowY: 'auto',
     WebkitOverflowScrolling: 'touch',
     overscrollBehavior: 'contain',
@@ -1118,342 +843,360 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
   },
-  // ACCIONES / PASO INVENTARIO EXISTENTE
-  actionsContainer: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-    width: '100%',
-  },
-  documentStatusCard: {
-    backgroundColor: '#f8fafc',
-    border: '1px solid #e2e8f0',
-    borderRadius: '14px',
-    padding: '12px 14px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-  },
-  docStatusTop: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  docStatusBadge: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    fontSize: '12px',
-    fontWeight: '700',
-    color: '#16a34a',
-  },
-  docStatusDate: {
-    fontSize: '11px',
-    color: '#64748b',
-    fontWeight: '500',
-  },
-  insurancePillRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-    marginTop: '4px',
-    paddingTop: '6px',
-    borderTop: '1px solid #edf2f7',
-  },
-  insurancePillText: {
-    fontSize: '11px',
-    fontWeight: '600',
-    color: '#475569',
-  },
-  actionsList: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px',
-  },
-  actionBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '12px',
-    padding: '12px 14px',
-    backgroundColor: '#ffffff',
-    border: '1px solid #e2e8f0',
-    borderRadius: '14px',
-    cursor: 'pointer',
-    textAlign: 'left',
-    transition: 'all 0.15s ease',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
-  },
-  actionIconBox: {
-    width: '40px',
-    height: '40px',
-    borderRadius: '10px',
-    backgroundColor: '#f1f5f9',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  actionTextBox: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    minWidth: 0,
-  },
-  actionTitle: {
-    fontSize: '13px',
-    fontWeight: '700',
-    color: '#0f172a',
-  },
-  actionDesc: {
-    fontSize: '11px',
-    color: '#64748b',
-    lineHeight: 1.3,
-  },
-  doneBtn: {
-    width: '100%',
-    padding: '12px',
-    backgroundColor: '#f8fafc',
-    color: '#0f172a',
-    border: '1px solid #cbd5e1',
-    borderRadius: '10px',
-    fontSize: '13px',
-    fontWeight: '600',
-    cursor: 'pointer',
-  },
-  // VISOR INTERACTIVO
-  viewerContainer: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '10px',
-    height: '100%',
-    minHeight: '520px',
-  },
-  viewerHeaderBar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '6px 2px',
-  },
-  viewerBadge: {
-    fontSize: '11px',
-    fontWeight: '700',
-    color: '#1e40af',
-    backgroundColor: '#dbeafe',
-    padding: '3px 7px',
-    borderRadius: '6px',
-  },
-  viewerPropName: {
-    fontSize: '12px',
-    fontWeight: '600',
-    color: '#475569',
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    maxWidth: '140px',
-  },
-  viewerActionBtn: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '4px',
-    padding: '6px 10px',
-    backgroundColor: '#f1f5f9',
-    border: '1px solid #e2e8f0',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    color: '#0f172a',
-    fontWeight: '500',
-  },
-  iframeWrapper: {
+  // El cuerpo de configuración no scrollea: scrollea el área interna y el botón queda fijo abajo
+  configBody: {
     flex: 1,
-    minHeight: '420px',
-    height: 'calc(75vh - 120px)',
-    backgroundColor: '#f8fafc',
-    borderRadius: '12px',
+    minHeight: 0,
     overflow: 'hidden',
-    border: '1px solid #e2e8f0',
-    boxShadow: 'inset 0 1px 4px rgba(0,0,0,0.05)',
+    padding: 0,
+    gap: 0,
   },
-  iframe: {
-    width: '100%',
-    height: '100%',
-    border: 'none',
+  configScroll: {
+    flex: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    WebkitOverflowScrolling: 'touch',
+    overscrollBehavior: 'contain',
+    touchAction: 'pan-y',
+    padding: '0 0 16px 0',
   },
-  viewerFooterBar: {
-    marginTop: '4px',
-  },
-  openExternalFullBtn: {
-    width: '100%',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    padding: '12px',
-    backgroundColor: '#0f172a',
-    color: '#ffffff',
-    border: 'none',
-    borderRadius: '10px',
-    fontSize: '13px',
-    fontWeight: '600',
-    cursor: 'pointer',
-  },
-  // FORMULARIO DE CONFIGURACIÓN
-  formContainer: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-    width: '100%',
-    boxSizing: 'border-box',
-  },
-  reGenerateNotice: {
-    backgroundColor: '#fefce8',
-    border: '1px solid #fef08a',
-    borderRadius: '12px',
-    padding: '10px 12px',
-    marginBottom: '2px',
-  },
-  rowCard: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#ffffff',
-    border: '1px solid #e2e8f0',
-    borderRadius: '12px',
-    padding: '10px 12px',
-    boxSizing: 'border-box',
-    width: '100%',
-  },
-  rowLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-  },
-  iconCircle: {
-    width: '28px',
-    height: '28px',
-    borderRadius: '7px',
-    backgroundColor: '#f1f5f9',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
+  stickyFooter: {
     flexShrink: 0,
-  },
-  fieldCard: {
+    padding: '12px 0 calc(12px + env(safe-area-inset-bottom, 0px)) 0',
+    borderTop: '1px solid #eef1f5',
     backgroundColor: '#ffffff',
-    border: '1px solid #e2e8f0',
-    borderRadius: '12px',
-    padding: '10px 12px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-    boxSizing: 'border-box',
-    width: '100%',
   },
-  fieldHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-  },
-  fieldHeaderBetween: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-  },
-  statusBadgeSmall: {
-    fontSize: '11px',
-    fontWeight: '700',
-    padding: '3px 8px',
-    borderRadius: '8px',
-    letterSpacing: '0.2px',
-  },
-  fieldLabel: {
-    fontSize: '13px',
-    fontWeight: '600',
-    color: '#0f172a',
-    display: 'block',
-  },
-  fieldSubLabel: {
-    fontSize: '11px',
-    color: '#64748b',
-    display: 'block',
-    marginTop: '1px',
-  },
-  roomsCountBadge: {
-    fontSize: '11px',
-    fontWeight: '700',
-    backgroundColor: '#f1f5f9',
-    color: '#475569',
-    padding: '2px 7px',
-    borderRadius: '10px',
-  },
-  roomsSummaryBox: {
-    padding: '8px 10px',
-    backgroundColor: '#f8fafc',
-    borderRadius: '9px',
-    border: '1px solid #f1f5f9',
-    marginTop: '4px',
-  },
-  roomsPillList: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '6px',
-    alignItems: 'center',
-  },
-  roomsSummaryPill: {
-    fontSize: '11px',
-    fontWeight: '600',
-    color: '#334155',
-    backgroundColor: '#ffffff',
-    border: '1px solid #e2e8f0',
-    borderRadius: '6px',
-    padding: '2px 8px',
-    display: 'inline-flex',
-    alignItems: 'center',
-  },
-  roomsSummaryMore: {
-    fontSize: '11px',
-    fontWeight: '500',
-    color: '#64748b',
-    padding: '2px 4px',
-  },
-  emptyRoomsBox: {
-    padding: '14px',
+  footerNote: {
+    margin: '8px 0 0 0',
     textAlign: 'center',
     fontSize: '12px',
     color: '#94a3b8',
+  },
+
+  // BOTÓN PRINCIPAL
+  primaryBtn: {
+    width: '100%',
+    height: '52px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    backgroundColor: '#4f46e5',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '14px',
+    fontSize: '16px',
+    fontWeight: '700',
+    fontFamily: 'inherit',
+    cursor: 'pointer',
+    boxShadow: '0 6px 16px rgba(79, 70, 229, 0.28)',
+  },
+
+  // PASO: PDF LISTO
+  actionsContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+    width: '100%',
+    paddingTop: '4px',
+  },
+  readyHero: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    textAlign: 'center',
+    padding: '12px 0 4px 0',
+  },
+  readyIcon: {
+    width: '60px',
+    height: '60px',
+    borderRadius: '50%',
+    backgroundColor: '#dcfce7',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: '12px',
+  },
+  readyTitle: {
+    fontSize: '19px',
+    fontWeight: '700',
+    color: '#0f172a',
+    letterSpacing: '-0.2px',
+  },
+  readyMeta: {
+    marginTop: '4px',
+    fontSize: '13px',
+    color: '#64748b',
+  },
+  tileGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: '10px',
+  },
+  tile: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '8px',
+    padding: '14px 6px',
+    backgroundColor: '#ffffff',
+    border: '1px solid #e8ecf1',
+    borderRadius: '16px',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    transition: 'all 0.15s ease',
+  },
+  tileIcon: {
+    width: '44px',
+    height: '44px',
+    borderRadius: '13px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tileLabel: {
+    fontSize: '13px',
+    fontWeight: '600',
+    color: '#0f172a',
+  },
+  linkBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
+    padding: '10px',
+    background: 'none',
+    border: 'none',
+    color: '#64748b',
+    fontSize: '14px',
+    fontWeight: '600',
+    fontFamily: 'inherit',
+    cursor: 'pointer',
+  },
+
+  // CONFIGURACIÓN
+  sectionLabel: {
+    fontSize: '12px',
+    fontWeight: '700',
+    color: '#64748b',
+    textTransform: 'uppercase',
+    letterSpacing: '0.6px',
+    margin: '18px 4px 8px 4px',
+  },
+  hintText: {
+    margin: '8px 4px 0 4px',
+    fontSize: '12.5px',
+    color: '#64748b',
+    lineHeight: 1.4,
+  },
+  segmented: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: '4px',
+    padding: '4px',
+    backgroundColor: '#f1f5f9',
+    borderRadius: '14px',
+  },
+  segment: {
+    height: '46px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    border: '1.5px solid transparent',
+    borderRadius: '11px',
+    cursor: 'pointer',
+    padding: '0 6px',
+    fontFamily: 'inherit',
+    transition: 'all 0.15s ease',
+  },
+  segmentActive: {
+    backgroundColor: '#ffffff',
+    borderColor: '#4f46e5',
+    boxShadow: '0 2px 6px rgba(15, 23, 42, 0.08)',
+  },
+  segmentLogo: {
+    maxHeight: '22px',
+    maxWidth: '84px',
+    objectFit: 'contain',
+  },
+  segmentText: {
+    fontSize: '14px',
+    fontWeight: '700',
+  },
+  listGroup: {
+    backgroundColor: '#ffffff',
+    border: '1px solid #e8ecf1',
+    borderRadius: '16px',
+    overflow: 'hidden',
+    width: '100%',
+    boxSizing: 'border-box',
+  },
+  listRow: {
+    minHeight: '54px',
+    padding: '8px 14px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '12px',
+    boxSizing: 'border-box',
+  },
+  listRowBtn: {
+    width: '100%',
+    minHeight: '54px',
+    padding: '8px 14px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '12px',
+    backgroundColor: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    textAlign: 'left',
+    fontFamily: 'inherit',
+    boxSizing: 'border-box',
+  },
+  listRowDivider: {
+    borderTop: '1px solid #f1f5f9',
+  },
+  rowTextBox: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '1px',
+    minWidth: 0,
+  },
+  rowTitle: {
+    fontSize: '15px',
+    fontWeight: '600',
+    color: '#0f172a',
+  },
+  rowHint: {
+    fontSize: '12px',
+    color: '#94a3b8',
+  },
+  rowValue: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    fontSize: '14px',
+    color: '#64748b',
+    fontWeight: '500',
+    flexShrink: 0,
+  },
+  expandBox: {
+    padding: '4px 14px 14px 14px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '10px',
+    backgroundColor: '#ffffff',
+  },
+  radioRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '8px 0',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    textAlign: 'left',
+    fontFamily: 'inherit',
+  },
+  radioDot: {
+    width: '22px',
+    height: '22px',
+    borderRadius: '50%',
+    border: '2px solid #cbd5e1',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    boxSizing: 'border-box',
+  },
+  radioDotActive: {
+    borderColor: '#4f46e5',
+  },
+  radioDotInner: {
+    width: '10px',
+    height: '10px',
+    borderRadius: '50%',
+    backgroundColor: '#4f46e5',
+  },
+  radioText: {
+    fontSize: '14px',
+    color: '#0f172a',
+    fontWeight: '500',
+  },
+  dateInput: {
+    width: '100%',
+    height: '44px',
+    padding: '0 12px',
+    borderRadius: '10px',
+    border: '1px solid #cbd5e1',
+    backgroundColor: '#ffffff',
+    fontSize: '15px',
+    color: '#0f172a',
+    outline: 'none',
+    boxSizing: 'border-box',
+    fontFamily: 'inherit',
+  },
+  inputGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  inputLabel: {
+    fontSize: '12px',
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  textInput: {
+    height: '44px',
+    padding: '0 12px',
+    borderRadius: '10px',
+    border: '1px solid #cbd5e1',
+    fontSize: '15px',
+    color: '#0f172a',
+    outline: 'none',
+    boxSizing: 'border-box',
+    fontFamily: 'inherit',
+  },
+
+  // Orden de ambientes
+  emptyRoomsBox: {
+    padding: '14px',
+    textAlign: 'center',
+    fontSize: '13px',
+    color: '#94a3b8',
     backgroundColor: '#f8fafc',
-    borderRadius: '8px',
+    borderRadius: '10px',
     border: '1px dashed #cbd5e1',
   },
   roomsListContainer: {
     display: 'flex',
     flexDirection: 'column',
     gap: '6px',
-    maxHeight: '260px',
+    maxHeight: '280px',
     overflowY: 'auto',
     WebkitOverflowScrolling: 'touch',
-    paddingRight: '2px',
-    marginTop: '6px',
   },
   roomRow: {
     backgroundColor: '#f8fafc',
-    border: '1px solid #e2e8f0',
-    borderRadius: '9px',
-    padding: '7px 10px',
+    borderRadius: '12px',
+    padding: '6px 6px 6px 10px',
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
+    gap: '10px',
     userSelect: 'none',
-    boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
   },
   roomPositionPill: {
-    width: '22px',
-    height: '22px',
-    borderRadius: '6px',
+    width: '24px',
+    height: '24px',
+    borderRadius: '8px',
     backgroundColor: '#ffffff',
-    border: '1px solid #cbd5e1',
-    color: '#0f172a',
-    fontSize: '11px',
+    border: '1px solid #e2e8f0',
+    color: '#475569',
+    fontSize: '12px',
     fontWeight: '700',
     display: 'flex',
     alignItems: 'center',
@@ -1461,21 +1204,14 @@ const styles = {
     flexShrink: 0,
   },
   roomNameText: {
-    fontSize: '13px',
+    flex: 1,
+    minWidth: 0,
+    fontSize: '14px',
     fontWeight: '600',
     color: '#0f172a',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
-  },
-  roomItemsBadge: {
-    fontSize: '11px',
-    color: '#64748b',
-    backgroundColor: '#ffffff',
-    border: '1px solid #e2e8f0',
-    borderRadius: '10px',
-    padding: '1px 6px',
-    flexShrink: 0,
   },
   roomOrderButtons: {
     display: 'flex',
@@ -1484,10 +1220,10 @@ const styles = {
     marginLeft: 'auto',
   },
   orderArrowBtn: {
-    width: '28px',
-    height: '28px',
-    borderRadius: '7px',
-    border: '1px solid #cbd5e1',
+    width: '36px',
+    height: '36px',
+    borderRadius: '10px',
+    border: '1px solid #e2e8f0',
     backgroundColor: '#ffffff',
     color: '#0f172a',
     display: 'flex',
@@ -1498,281 +1234,118 @@ const styles = {
     touchAction: 'manipulation',
   },
   orderArrowBtnDisabled: {
-    opacity: 0.25,
+    opacity: 0.3,
     cursor: 'not-allowed',
-    backgroundColor: '#f1f5f9',
-    borderColor: '#e2e8f0',
-    color: '#94a3b8',
   },
-  settingsGroupCard: {
-    backgroundColor: '#ffffff',
-    border: '1px solid #e2e8f0',
-    borderRadius: '12px',
-    display: 'flex',
-    flexDirection: 'column',
-    boxSizing: 'border-box',
-    width: '100%',
-    overflow: 'hidden',
-  },
-  settingsGroupItem: {
-    padding: '10px 12px',
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  settingsGroupRow: {
-    padding: '10px 12px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: '10px',
-  },
-  settingsGroupDivider: {
-    height: '1px',
-    backgroundColor: '#f1f5f9',
-    width: '100%',
-  },
-  insuranceRow: {
-    display: 'grid',
-    gridTemplateColumns: '1fr 1fr',
-    gap: '8px',
-    marginTop: '4px',
-    width: '100%',
-    boxSizing: 'border-box',
-  },
-  insuranceCard: {
-    position: 'relative',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '6px',
-    padding: '10px 6px',
-    borderRadius: '11px',
-    cursor: 'pointer',
-    transition: 'all 0.18s ease',
-    userSelect: 'none',
-    boxSizing: 'border-box',
-  },
-  insuranceCardActive: {
-    backgroundColor: '#f8fafc',
-    border: '2px solid #0f172a',
-    boxShadow: '0 2px 8px rgba(15, 23, 42, 0.08)',
-  },
-  insuranceCardInactive: {
-    backgroundColor: '#ffffff',
-    border: '1px solid #e2e8f0',
-    opacity: 0.75,
-  },
-  cardCheckCircle: {
-    position: 'absolute',
-    top: '6px',
-    right: '6px',
-    width: '18px',
-    height: '18px',
-    borderRadius: '50%',
-    backgroundColor: '#0f172a',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-  },
-  logoWrap: {
-    height: '24px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  insuranceImg: {
-    maxHeight: '22px',
-    maxWidth: '90px',
-    objectFit: 'contain',
-  },
-  cardLabel: {
-    fontSize: '12px',
-    textAlign: 'center',
-  },
-  statusPill: {
-    fontSize: '10px',
-    fontWeight: '600',
-    padding: '2px 7px',
-    borderRadius: '14px',
-  },
-  selectInput: {
-    width: '100%',
-    padding: '8px 10px',
-    borderRadius: '7px',
-    border: '1px solid #cbd5e1',
-    backgroundColor: '#ffffff',
-    fontSize: '13px',
-    color: '#0f172a',
-    outline: 'none',
-  },
-  dateInput: {
-    width: '100%',
-    padding: '7px 10px',
-    borderRadius: '7px',
-    border: '1px solid #cbd5e1',
-    backgroundColor: '#ffffff',
-    fontSize: '13px',
-    color: '#0f172a',
-    outline: 'none',
-  },
-  switchContainer: {
-    position: 'relative',
-    display: 'inline-block',
-    width: '36px',
-    height: '20px',
-    cursor: 'pointer',
-  },
-  hiddenCheckbox: {
-    opacity: 0,
-    width: 0,
-    height: 0,
-    position: 'absolute',
-  },
+
+  // Interruptor tipo iOS
   switchTrack: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderRadius: '20px',
-    transition: '0.2s',
+    position: 'relative',
+    width: '48px',
+    height: '29px',
+    borderRadius: '29px',
+    border: 'none',
+    padding: 0,
+    flexShrink: 0,
+    cursor: 'pointer',
+    transition: 'background-color 0.2s ease',
   },
   switchThumb: {
     position: 'absolute',
-    content: '""',
-    height: '14px',
-    width: '14px',
-    left: '3px',
-    bottom: '3px',
+    top: '2px',
+    left: '2px',
+    height: '25px',
+    width: '25px',
     backgroundColor: '#ffffff',
     borderRadius: '50%',
-    transition: '0.2s',
-    boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
+    transition: 'transform 0.2s ease',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
   },
-  signaturesContainer: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-    paddingTop: '6px',
-    borderTop: '1px dashed #e2e8f0',
-  },
-  inputGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '3px',
-  },
-  inputLabel: {
-    fontSize: '11px',
-    fontWeight: '600',
-    color: '#475569',
-  },
-  textInput: {
-    padding: '7px 10px',
-    borderRadius: '7px',
-    border: '1px solid #cbd5e1',
-    fontSize: '13px',
-    color: '#0f172a',
-    outline: 'none',
-  },
-  generateBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '8px',
-    padding: '12px',
-    color: '#ffffff',
-    borderRadius: '10px',
-    border: 'none',
-    fontSize: '14px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    marginTop: '4px',
-    boxShadow: '0 4px 10px rgba(15, 23, 42, 0.12)',
-    transition: 'all 0.18s',
-  },
+
   // ESTADO DE CARGA
   loadingBox: {
-    padding: '30px 16px',
+    padding: '48px 16px',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     textAlign: 'center',
   },
   spinnerCircle: {
-    width: '48px',
-    height: '48px',
+    width: '64px',
+    height: '64px',
     borderRadius: '50%',
-    backgroundColor: '#f1f5f9',
+    backgroundColor: '#eef2ff',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: '12px',
+    marginBottom: '16px',
   },
   loadingTitle: {
-    fontSize: '15px',
+    fontSize: '18px',
     fontWeight: '700',
     color: '#0f172a',
-    margin: '0 0 4px 0',
+    margin: '0 0 6px 0',
   },
   loadingSub: {
-    fontSize: '12px',
+    fontSize: '14px',
     color: '#64748b',
     margin: 0,
     lineHeight: 1.4,
     maxWidth: '280px',
   },
+
   // ESTADO DE ERROR
   errorBox: {
-    padding: '20px 14px',
+    padding: '32px 14px 20px 14px',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     textAlign: 'center',
   },
   errorIconCircle: {
-    width: '48px',
-    height: '48px',
+    width: '56px',
+    height: '56px',
     borderRadius: '50%',
     backgroundColor: '#fee2e2',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: '10px',
+    marginBottom: '12px',
   },
   errorTitle: {
-    fontSize: '15px',
+    fontSize: '17px',
     fontWeight: '700',
     color: '#991b1b',
-    margin: '0 0 4px 0',
+    margin: '0 0 6px 0',
   },
   errorDesc: {
-    fontSize: '12px',
+    fontSize: '14px',
     color: '#64748b',
-    margin: '0 0 12px 0',
+    margin: '0 0 14px 0',
     lineHeight: 1.4,
   },
   retryBtn: {
     flex: 1,
-    padding: '9px',
-    backgroundColor: '#0f172a',
+    height: '48px',
+    backgroundColor: '#4f46e5',
     color: '#ffffff',
     border: 'none',
-    borderRadius: '8px',
-    fontSize: '13px',
-    fontWeight: '600',
+    borderRadius: '12px',
+    fontSize: '15px',
+    fontWeight: '700',
+    fontFamily: 'inherit',
     cursor: 'pointer',
   },
   cancelBtn: {
     flex: 1,
-    padding: '9px',
+    height: '48px',
     backgroundColor: '#f1f5f9',
     color: '#475569',
-    border: '1px solid #e2e8f0',
-    borderRadius: '8px',
-    fontSize: '13px',
-    fontWeight: '500',
+    border: 'none',
+    borderRadius: '12px',
+    fontSize: '15px',
+    fontWeight: '600',
+    fontFamily: 'inherit',
     cursor: 'pointer',
   },
 };

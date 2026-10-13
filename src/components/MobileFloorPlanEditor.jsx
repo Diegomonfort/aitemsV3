@@ -80,7 +80,6 @@ export default function MobileFloorPlanEditor({
   const [selectedShapeId, setSelectedShapeId] = useState(null);
   const [isPropsModalOpen, setIsPropsModalOpen] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const lastTapRef = useRef({ time: 0, id: null });
 
   // Nombre de la propiedad limpio (sin 'Plano —')
   const propertyDisplayName = property?.name || 'Propiedad';
@@ -168,6 +167,9 @@ export default function MobileFloorPlanEditor({
   });
   const pinchJustEndedRef = useRef(0);
   const touchCountRef = useRef(0);
+  // Lote de movimientos: se aplica como máximo una vez por frame para que el arrastre sea fluido
+  const pendingMoveRef = useRef(null);
+  const moveRafRef = useRef(null);
 
   useEffect(() => {
     scaleRef.current = scale;
@@ -181,6 +183,41 @@ export default function MobileFloorPlanEditor({
   const currentFloorIndex = floors.findIndex(f => f.id === activeFloorId);
   const currentFloor = currentFloorIndex >= 0 ? floors[currentFloorIndex] : floors[0];
   const currentShapes = currentFloor?.shapes || [];
+
+  // Copia siempre actualizada de los pisos (se usa durante el arrastre sin depender del render)
+  const floorsRef = useRef(floors);
+  floorsRef.current = floors;
+
+  const applyFloors = (updater) => {
+    const next = updater(floorsRef.current);
+    floorsRef.current = next;
+    setFloors(next);
+  };
+
+  const scheduleMove = (apply) => {
+    pendingMoveRef.current = apply;
+    if (moveRafRef.current) return;
+    moveRafRef.current = requestAnimationFrame(() => {
+      moveRafRef.current = null;
+      const fn = pendingMoveRef.current;
+      pendingMoveRef.current = null;
+      if (fn) fn();
+    });
+  };
+
+  const cancelPendingMove = () => {
+    if (moveRafRef.current) {
+      cancelAnimationFrame(moveRafRef.current);
+      moveRafRef.current = null;
+    }
+    pendingMoveRef.current = null;
+  };
+
+  const flushPendingMove = () => {
+    const fn = pendingMoveRef.current;
+    cancelPendingMove();
+    if (fn) fn();
+  };
   const selectedShape = currentShapes.find(s => s.id === selectedShapeId);
 
   // Piso inferior de referencia (papel cebolla / blueprint transparente)
@@ -518,8 +555,15 @@ export default function MobileFloorPlanEditor({
   // ============ MANEJO DE PUNTERO (DIBUJO, DRAG Y RESIZE TÁCTIL) ============
   const handlePointerDown = (e, shapeId = null) => {
     if (pinchRef.current.active) return;
-    if (touchCountRef.current >= 2 || (Date.now() - pinchJustEndedRef.current < 450)) return;
+    if (touchCountRef.current >= 2 || (Date.now() - pinchJustEndedRef.current < 250)) return;
     if (e.pointerType === 'touch' && e.isPrimary === false) return;
+
+    // Si quedó un arrastre anterior sin cerrar, cerrarlo antes de empezar uno nuevo
+    if (dragRef.current.active) {
+      flushPendingMove();
+      dragRef.current.active = false;
+      dragRef.current.mode = 'none';
+    }
 
     const coords = getWorldCoord(e);
 
@@ -554,13 +598,6 @@ export default function MobileFloorPlanEditor({
     if (shapeId && !panMode) {
       const targetShape = currentShapes.find(s => s.id === shapeId);
       if (!targetShape) return;
-
-      // Doble toque rápido sobre la habitación para abrir configuración
-      const now = Date.now();
-      if (lastTapRef.current.id === shapeId && (now - lastTapRef.current.time < 350)) {
-        setIsPropsModalOpen(true);
-      }
-      lastTapRef.current = { time: now, id: shapeId };
 
       setSelectedShapeId(shapeId);
       if (!targetShape.locked) {
@@ -630,7 +667,7 @@ export default function MobileFloorPlanEditor({
 
   const handlePointerMove = useCallback((e) => {
     if (pinchRef.current.active) return;
-    if (touchCountRef.current >= 2 || (Date.now() - pinchJustEndedRef.current < 450)) return;
+    if (touchCountRef.current >= 2 || (Date.now() - pinchJustEndedRef.current < 250)) return;
 
     const coords = getWorldCoord(e);
 
@@ -668,15 +705,21 @@ export default function MobileFloorPlanEditor({
       const snappedX = snapToGrid(rawX);
       const snappedY = snapToGrid(rawY);
 
-      setFloors(prev => prev.map(f => {
+      // Con grilla, la mayoría de eventos dan la misma posición: no re-renderizar en vano
+      if (dragRef.current.lastX === snappedX && dragRef.current.lastY === snappedY) return;
+      dragRef.current.lastX = snappedX;
+      dragRef.current.lastY = snappedY;
+
+      const targetId = dragRef.current.targetId;
+      scheduleMove(() => applyFloors(prev => prev.map(f => {
         if (f.id !== activeFloorId) return f;
         return {
           ...f,
           shapes: f.shapes.map(s => 
-            s.id === dragRef.current.targetId ? { ...s, x: snappedX, y: snappedY } : s
+            s.id === targetId ? { ...s, x: snappedX, y: snappedY } : s
           )
         };
-      }));
+      })));
     } else if (dragRef.current.mode === 'resize') {
       const handle = dragRef.current.handle || 'se';
       const worldDeltaX = deltaX / scale;
@@ -711,34 +754,39 @@ export default function MobileFloorPlanEditor({
         nextH = shapeStartHeight - snappedDeltaY;
       }
 
-      setFloors(prev => prev.map(f => {
+      const resizeKey = `${nextX}|${nextY}|${nextW}|${nextH}`;
+      if (dragRef.current.lastResizeKey === resizeKey) return;
+      dragRef.current.lastResizeKey = resizeKey;
+
+      const targetId = dragRef.current.targetId;
+      scheduleMove(() => applyFloors(prev => prev.map(f => {
         if (f.id !== activeFloorId) return f;
         return {
           ...f,
           shapes: f.shapes.map(s => 
-            s.id === dragRef.current.targetId ? { ...s, x: nextX, y: nextY, width: nextW, height: nextH } : s
+            s.id === targetId ? { ...s, x: nextX, y: nextY, width: nextW, height: nextH } : s
           )
         };
-      }));
+      })));
     } else if (dragRef.current.mode === 'pan') {
       const nextPanX = dragRef.current.panStartX + deltaX;
       const nextPanY = dragRef.current.panStartY + deltaY;
       panRef.current = { x: nextPanX, y: nextPanY };
-      setPan({
-        x: nextPanX,
-        y: nextPanY
-      });
+      scheduleMove(() => setPan({ x: nextPanX, y: nextPanY }));
     }
   }, [activeFloorId, drawingMode, pan.x, pan.y, rectDrawing, scale]);
 
   const handlePointerUp = useCallback(() => {
-    if (pinchRef.current.active || touchCountRef.current >= 2 || (Date.now() - pinchJustEndedRef.current < 450)) {
+    if (pinchRef.current.active || touchCountRef.current >= 2 || (Date.now() - pinchJustEndedRef.current < 250)) {
+      cancelPendingMove();
       setRectDrawing(null);
       setIsDragging(false);
       dragRef.current.active = false;
       dragRef.current.mode = 'none';
       return;
     }
+    // Aplicar la última posición pendiente antes de cerrar el gesto
+    flushPendingMove();
     setIsDragging(false);
 
     // Si terminó de dibujar rectángulo
@@ -780,12 +828,21 @@ export default function MobileFloorPlanEditor({
 
     if (dragRef.current.active) {
       if ((dragRef.current.mode === 'shape' || dragRef.current.mode === 'resize') && dragRef.current.hasMoved) {
-        pushHistory(floors);
+        pushHistory(floorsRef.current);
       }
       dragRef.current.active = false;
       dragRef.current.mode = 'none';
     }
   }, [currentShapes, drawingMode, floors, pushHistory, rectDrawing, updateCurrentFloorShapes]);
+
+  // iOS puede cancelar el gesto (llamada, gesto del sistema, etc.): cerrar todo sin dejar el arrastre colgado
+  const handlePointerCancel = useCallback(() => {
+    cancelPendingMove();
+    setRectDrawing(null);
+    setIsDragging(false);
+    dragRef.current.active = false;
+    dragRef.current.mode = 'none';
+  }, []);
 
   // ============ GESTO MULTI-TOUCH FLUIDO (PINCH TO ZOOM + PAN CON 2 DEDOS) ============
   useEffect(() => {
@@ -801,6 +858,7 @@ export default function MobileFloorPlanEditor({
         setRectDrawing(null);
 
         // Si el usuario tenía 1 dedo arrastrando una habitación, restaurarla a su posición inicial
+        cancelPendingMove();
         if (dragRef.current.active) {
           if (dragRef.current.mode === 'shape' && dragRef.current.targetId) {
             const targetId = dragRef.current.targetId;
@@ -883,9 +941,15 @@ export default function MobileFloorPlanEditor({
     };
 
     const onTouchEnd = (e) => {
+      const prevCount = touchCountRef.current;
       touchCountRef.current = e.touches.length;
-      pinchJustEndedRef.current = Date.now();
-      setRectDrawing(null);
+
+      // Solo bloquear nuevos gestos si realmente hubo multi-touch (pinch).
+      // Un toque simple NO debe bloquear el siguiente toque ni el arrastre.
+      if (prevCount >= 2 || pinchRef.current.active) {
+        pinchJustEndedRef.current = Date.now();
+        setRectDrawing(null);
+      }
 
       if (pinchRef.current.active && e.touches.length < 2) {
         pinchRef.current.active = false;
@@ -929,6 +993,13 @@ export default function MobileFloorPlanEditor({
       }
     };
 
+    // Sin doble toque, sin selección de texto, sin lupa ni menú contextual en el lienzo
+    const preventDefault = (e) => e.preventDefault();
+    el.addEventListener('dblclick', preventDefault);
+    el.addEventListener('selectstart', preventDefault);
+    el.addEventListener('contextmenu', preventDefault);
+    el.addEventListener('gesturestart', preventDefault);
+
     el.addEventListener('touchstart', onTouchStart, { passive: false });
     el.addEventListener('touchmove', onTouchMove, { passive: false });
     el.addEventListener('touchend', onTouchEnd, { passive: false });
@@ -937,6 +1008,10 @@ export default function MobileFloorPlanEditor({
 
     return () => {
       el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('dblclick', preventDefault);
+      el.removeEventListener('selectstart', preventDefault);
+      el.removeEventListener('contextmenu', preventDefault);
+      el.removeEventListener('gesturestart', preventDefault);
       el.removeEventListener('touchmove', onTouchMove);
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('touchcancel', onTouchEnd);
@@ -1291,6 +1366,7 @@ export default function MobileFloorPlanEditor({
         onPointerDown={(e) => handlePointerDown(e)}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
       >
         <svg style={editorStyles.svgCanvas} xmlns="http://www.w3.org/2000/svg">
           <defs>
@@ -2610,12 +2686,19 @@ const editorStyles = {
     position: 'relative',
     overflow: 'hidden',
     touchAction: 'none',
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
+    WebkitTouchCallout: 'none',
+    WebkitTapHighlightColor: 'transparent',
     backgroundColor: '#f8fafc',
   },
   svgCanvas: {
     display: 'block',
     width: '100%',
     height: '100%',
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
+    WebkitTouchCallout: 'none',
   },
   startHelperPill: {
     position: 'absolute',
