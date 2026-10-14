@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Building2, Globe, MapPin, Camera, X, ArrowRight, AlertCircle, Loader2, ChevronDown } from 'lucide-react';
+import { Building2, Globe, MapPin, Camera, X, ArrowRight, AlertCircle, Loader2, ChevronDown, LogOut } from 'lucide-react';
 import logo from '../../assets/logo-color.png';
 import { agencyService } from '../../services/agencyService';
 import { getCountries, getStates, getCities } from '../../data/locationData';
 
-export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobiliaria }) {
+export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobiliaria, onLogout }) {
   const initialCountry = initialData?.country || 'Uruguay';
   const initialStates = getStates(initialCountry);
   const initialState = initialData?.state && initialStates.includes(initialData.state)
@@ -134,6 +134,32 @@ export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobi
   return (
     <div style={styles.container} className="app-auth-screen">
       <div style={styles.scrollContent} className="app-auth-card no-scrollbar">
+        {/* Botón superior de Cerrar Sesión */}
+        {onLogout && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%', marginBottom: 4 }}>
+            <button
+              type="button"
+              onClick={onLogout}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: 20,
+                padding: '6px 12px',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: '#64748b',
+                cursor: 'pointer',
+              }}
+            >
+              <LogOut size={13} color="#64748b" />
+              <span>Cerrar sesión</span>
+            </button>
+          </div>
+        )}
+
         {/* Cabecera Limpia */}
         <div style={styles.headerBox}>
           <div style={styles.logoWrapper}>
@@ -309,6 +335,31 @@ export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobi
               </>
             )}
           </button>
+
+          {/* Botón secundario para cerrar sesión y cambiar de cuenta */}
+          {onLogout && (
+            <div style={{ textAlign: 'center', marginTop: 14 }}>
+              <button
+                type="button"
+                onClick={onLogout}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#dc2626',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  padding: '8px 14px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <LogOut size={14} color="#dc2626" />
+                <span>Cerrar sesión y usar otra cuenta</span>
+              </button>
+            </div>
+          )}
         </form>
       </div>
     </div>

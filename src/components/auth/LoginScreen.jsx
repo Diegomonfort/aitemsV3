@@ -142,9 +142,14 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
       return;
     }
 
-    // Verificar si el usuario es un agente restringido por Plan Free
+    // Verificar si el usuario fue eliminado o es un agente restringido
     try {
-      const profileRes = await api.get('/api/users/profile');
+      const profileRes = await api.get('/api/users/profile', { timeout: 4000 });
+      if (profileRes?.code === 'ACCOUNT_DELETED' || (profileRes?.status === 403 && profileRes?.code === 'ACCOUNT_DELETED')) {
+        await authService.signOut();
+        setError('Esta cuenta ha sido eliminada permanentemente.');
+        return;
+      }
       if (profileRes?.code === 'AGENT_PLAN_RESTRICTED' || (profileRes?.status === 403 && profileRes?.code === 'AGENT_PLAN_RESTRICTED')) {
         await authService.signOut();
         setError(profileRes.message || 'Tu cuenta de inspector está vinculada a una inmobiliaria con Plan Free. El acceso para inspectores está suspendido hasta que el titular actualice su suscripción.');
@@ -159,7 +164,7 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
     try {
       const { data } = await supabase
         .from('users')
-        .select('name, type, inmobiliaria_id, country, state, city')
+        .select('name, type, inmobiliaria_id, country, state, city, deleted')
         .eq('id', sessionUser.id)
         .maybeSingle();
       if (data) {
@@ -167,6 +172,13 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
       }
     } catch (err) {
       console.warn('No se pudo obtener datos de tabla users:', err);
+    }
+
+    // Bloquear acceso inmediato si la cuenta está eliminada
+    if (dbUser && (dbUser.deleted === true || dbUser.name === 'Usuario Eliminado' || (typeof dbUser.email === 'string' && dbUser.email.startsWith('deleted_')))) {
+      await authService.signOut();
+      setError('Esta cuenta ha sido eliminada permanentemente.');
+      return;
     }
 
     // Solo si Supabase autorizó con éxito, ingresa a la app

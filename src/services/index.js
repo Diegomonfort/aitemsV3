@@ -4,3 +4,4 @@ export { propertyService } from './propertyService';
 export { ambientService } from './ambientService';
 export { pdfService } from './pdfService';
 export { photoService } from './photoService';
+export { userService } from './userService';

@@ -48,15 +48,20 @@ import {
   Loader2,
   Users,
   MoreVertical,
-  History
+  History,
+  Settings,
+  HelpCircle,
+  User
 } from 'lucide-react';
 import logo from './assets/logo-color.png';
+import logoBlanco from './assets/logo-blanco_v1.png';
 import placeholderVertical from './assets/placeholderVertical.webp';
 import placeholderHorizontal from './assets/placeholderHorizontal.webp';
 import MobileFloorPlanEditor from './components/MobileFloorPlanEditor';
 import ExportPdfModal from './components/ExportPdfModal';
 import PDFViewer from './components/PDFViewer';
 import OwnerDashboard from './components/OwnerDashboard';
+import AjustesScreen from './components/AjustesScreen';
 import SharePropertyModal from './components/SharePropertyModal';
 import CreatePropertyModal from './components/CreatePropertyModal';
 import EditPropertyModal from './components/EditPropertyModal';
@@ -529,19 +534,31 @@ export default function App() {
 
   // Cargar propiedades reales del backend (todas y las 3 más recientes)
   const loadProperties = useCallback(async () => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated) {
+      setHasInitialPropertiesLoaded(true);
+      return;
+    }
     setIsLoadingProperties(true);
     try {
-      // 1. Cargar todas las propiedades para la pestaña "Propiedades"
-      const res = await propertyService.getProperties();
-      const allProps = res?.properties || res?.data?.properties || [];
-      if (Array.isArray(allProps)) {
-        setProperties(allProps);
+      // 1 y 2. Cargar propiedades y recientes en paralelo para máxima velocidad
+      const [allRes, recentRes] = await Promise.allSettled([
+        propertyService.getProperties(),
+        propertyService.getRecentProperties(),
+      ]);
+
+      let allProps = [];
+      if (allRes.status === 'fulfilled' && allRes.value) {
+        allProps = allRes.value.properties || allRes.value.data?.properties || [];
+        if (Array.isArray(allProps)) {
+          setProperties(allProps);
+        }
       }
 
-      // 2. Cargar las 3 recientes para la sección "Propiedades recientes" del Home
-      const recentRes = await propertyService.getRecentProperties();
-      const recentProps = recentRes?.recentProperties || recentRes?.data?.recentProperties || [];
+      let recentProps = [];
+      if (recentRes.status === 'fulfilled' && recentRes.value) {
+        recentProps = recentRes.value.recentProperties || recentRes.value.data?.recentProperties || [];
+      }
+
       if (Array.isArray(recentProps) && recentProps.length > 0) {
         setRecentProperties(recentProps);
       } else if (Array.isArray(allProps) && allProps.length > 0) {
@@ -554,6 +571,18 @@ export default function App() {
       setHasInitialPropertiesLoaded(true);
     }
   }, [isAuthenticated]);
+
+  // Desbloqueo de seguridad: nunca dejar la pantalla trabada en "Cargando tus propiedades..."
+  useEffect(() => {
+    if (isAuthenticated && authView === 'app' && !hasInitialPropertiesLoaded) {
+      const timer = setTimeout(() => {
+        console.warn('[App] Timeout de seguridad para hasInitialPropertiesLoaded alcanzado, desbloqueando interfaz.');
+        setHasInitialPropertiesLoaded(true);
+        setIsLoadingProperties(false);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [isAuthenticated, authView, hasInitialPropertiesLoaded]);
 
   // Cargar colegas del equipo / inmobiliaria para compartir
   const loadColleagues = useCallback(async () => {
@@ -657,7 +686,6 @@ export default function App() {
     } else {
       setAuthView('app');
       setActiveTab('home');
-      setHasInitialPropertiesLoaded(false);
       refreshProfile?.();
       loadProperties();
       loadColleagues();
@@ -3335,6 +3363,7 @@ export default function App() {
         <CreateInmobiliariaScreen 
           initialData={pendingRegisterData}
           onCompleteInmobiliaria={handleCompleteInmobiliaria}
+          onLogout={handleLogout}
         />
       </div>
     );
@@ -3343,56 +3372,57 @@ export default function App() {
   return (
     <div className="app-container" style={styles.appContainer}>
       {/* ============ TOP BAR ============ */}
-      <header className="app-top-bar" style={styles.topBar}>
-        <div 
-          style={styles.brandContainer}
-          onClick={() => {
-            setSelectedPropertyDetail(null);
-            setSelectedRoomDetail(null);
-            setActiveTab('home');
-            setIsMenuOpen(false);
-          }}
-          role="button"
-          tabIndex={0}
-          aria-label="Ir al inicio"
-        >
-          <img src={logo} alt="Aitems" style={styles.logo} />
-        </div>
-        <div style={styles.headerActions}>
-          <button 
-            style={styles.iconBtn} 
-            aria-label="Menu"
-            onClick={() => setIsMenuOpen(!isMenuOpen)}
+      {activeTab !== 'ajustes' && (
+        <header className="app-top-bar" style={styles.topBar}>
+          <div 
+            style={styles.brandContainer}
+            onClick={() => {
+              setSelectedPropertyDetail(null);
+              setSelectedRoomDetail(null);
+              setActiveTab('home');
+              setIsMenuOpen(false);
+            }}
+            role="button"
+            tabIndex={0}
+            aria-label="Ir al inicio"
           >
-            <Menu size={20} color="#1e293b" strokeWidth={2.2} />
-          </button>
-        </div>
-      </header>
+            <img src={logo} alt="Aitems" style={styles.logo} />
+          </div>
+          <div style={styles.headerActions}>
+            <button 
+              style={styles.iconBtn} 
+              aria-label="Menu"
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+            >
+              <Menu size={20} color="#1e293b" strokeWidth={2.2} />
+            </button>
+          </div>
+        </header>
+      )}
 
       {/* ============ MENÚ LATERAL DESPLEGABLE ============ */}
       {isMenuOpen && (
         <div style={styles.menuOverlay} onClick={() => setIsMenuOpen(false)}>
           <div style={styles.menuDrawer} onClick={(e) => e.stopPropagation()}>
-            <div style={styles.menuHeader}>
-              <span style={styles.menuTitle}>Aitems</span>
-              <button style={styles.menuCloseBtn} onClick={() => setIsMenuOpen(false)}>
-                <X size={18} color="#64748b" />
+            {/* Header del menú con fondo azul y logo blanco */}
+            <div style={styles.menuHeaderBanner}>
+              <div style={styles.menuLogoWrap}>
+                <img src={logoBlanco} alt="Aitems" style={styles.menuLogoImage} />
+              </div>
+              <button style={styles.menuCloseBtn} onClick={() => setIsMenuOpen(false)} aria-label="Cerrar menú">
+                <X size={20} color="#ffffff" />
               </button>
             </div>
+
             <div style={styles.menuContent}>
-              {/* Perfil del Usuario (Nombre y Email) */}
-              <div style={styles.drawerUserCard}>
+              {/* Perfil del Usuario */}
+              <div style={styles.drawerUserSection}>
                 <div style={styles.drawerUserAvatar}>
-                  {(currentUser?.name || currentUser?.email || 'U')
-                    .split(' ')
-                    .map(n => n[0])
-                    .join('')
-                    .slice(0, 2)
-                    .toUpperCase()}
+                  <User size={22} color="#ffffff" />
                 </div>
                 <div style={styles.drawerUserInfo}>
-                  <span style={styles.drawerUserName}>{currentUser?.name || 'Usuario'}</span>
-                  <span style={styles.drawerUserEmail}>{currentUser?.email || ''}</span>
+                  <h4 style={styles.drawerUserName}>{currentUser?.name || currentUser?.email?.split('@')[0] || 'Diego M'}</h4>
+                  <span style={styles.drawerUserEmail}>{currentUser?.email || 'monfortdiego@gmail.com'}</span>
                 </div>
               </div>
 
@@ -3456,6 +3486,39 @@ export default function App() {
                     <span>Panel de Inmobiliaria</span>
                   </button>
                 )}
+
+                <button 
+                  type="button"
+                  style={{
+                    ...styles.drawerNavBtn,
+                    backgroundColor: activeTab === 'ajustes' ? '#f1f5f9' : 'transparent',
+                    color: activeTab === 'ajustes' ? '#0f172a' : '#475569',
+                    fontWeight: activeTab === 'ajustes' ? '700' : '600',
+                  }}
+                  onClick={() => {
+                    setSelectedPropertyDetail(null);
+                    setSelectedRoomDetail(null);
+                    setActiveTab('ajustes');
+                    setIsMenuOpen(false);
+                  }}
+                >
+                  <Settings size={18} color={activeTab === 'ajustes' ? '#0f172a' : '#64748b'} />
+                  <span>Ajustes</span>
+                </button>
+
+                <button 
+                  type="button"
+                  style={styles.drawerNavBtn}
+                  onClick={() => {
+                    setSelectedPropertyDetail(null);
+                    setSelectedRoomDetail(null);
+                    setActiveTab('ajustes');
+                    setIsMenuOpen(false);
+                  }}
+                >
+                  <HelpCircle size={18} color="#64748b" />
+                  <span>Ayuda</span>
+                </button>
               </div>
 
               <div style={styles.drawerDivider} />
@@ -3467,7 +3530,7 @@ export default function App() {
                 onClick={handleLogout}
               >
                 <LogOut size={16} color="#ef4444" />
-                <span>Cerrar sesión</span>
+                <span>Cerrar Sesión</span>
               </button>
             </div>
           </div>
@@ -4036,6 +4099,29 @@ export default function App() {
           onRemoveAgent={handleRemoveAgent}
           onResendInvite={handleResendInvite}
           userRole={userRole}
+        />
+      )}
+
+      {/* ============ VISTA AJUSTES (SETTINGS) ============ */}
+      {activeTab === 'ajustes' && (
+        <AjustesScreen
+          currentUser={currentUser}
+          agency={agency}
+          propertiesCount={properties.length}
+          agentsCount={agents.length}
+          onUpdateUser={(updatedUserData) => {
+            setCurrentUser(prev => ({
+              ...prev,
+              ...updatedUserData
+            }));
+            if (typeof refreshProfile === 'function') {
+              refreshProfile();
+            }
+          }}
+          onBack={() => {
+            setActiveTab('home');
+          }}
+          onLogout={handleLogout}
         />
       )}
 
@@ -7332,75 +7418,77 @@ export default function App() {
       })()}
 
       {/* ============ BOTTOM NAVBAR ============ */}
-      <nav className="app-bottom-nav" style={styles.bottomNav}>
-        {/* 1. Tab Home */}
-        <button 
-          className="app-nav-btn"
-          style={styles.navBtn} 
-          onClick={() => {
-            setSelectedPropertyDetail(null);
-            setSelectedRoomDetail(null);
-            setActiveTab('home');
-          }}
-        >
-          <Home 
-            size={26} 
-            color={activeTab === 'home' && !selectedPropertyDetail ? '#4f46e5' : '#94a3b8'} 
-            strokeWidth={activeTab === 'home' && !selectedPropertyDetail ? 2.4 : 1.8} 
-          />
-          <span 
-            className="app-nav-label"
-            style={{ 
-              ...styles.navLabel, 
-              color: activeTab === 'home' && !selectedPropertyDetail ? '#4f46e5' : '#94a3b8', 
-              fontWeight: activeTab === 'home' && !selectedPropertyDetail ? '700' : '600' 
-            }}
-          >
-            Home
-          </span>
-          {activeTab === 'home' && !selectedPropertyDetail && <span style={styles.navActiveDot} />}
-        </button>
-
-        {/* 2. Botón Central: Crear (+) Negro, Minimalista y Proporcionado */}
-        <div className="app-fab-wrapper" style={styles.fabWrapper}>
+      {activeTab !== 'ajustes' && (
+        <nav className="app-bottom-nav" style={styles.bottomNav}>
+          {/* 1. Tab Home */}
           <button 
-            className="app-fab-button"
-            style={styles.fabButton} 
-            onClick={() => setIsModalOpen(true)}
-            aria-label="Crear propiedad"
-          >
-            <Plus size={26} color="#ffffff" strokeWidth={2.4} />
-          </button>
-        </div>
-
-        {/* 3. Tab Propiedades */}
-        <button 
-          className="app-nav-btn"
-          style={styles.navBtn} 
-          onClick={() => {
-            setSelectedPropertyDetail(null);
-            setSelectedRoomDetail(null);
-            setActiveTab('propiedades');
-          }}
-        >
-          <Building2 
-            size={26} 
-            color={activeTab === 'propiedades' && !selectedPropertyDetail ? '#4f46e5' : '#94a3b8'} 
-            strokeWidth={activeTab === 'propiedades' && !selectedPropertyDetail ? 2.4 : 1.8} 
-          />
-          <span 
-            className="app-nav-label"
-            style={{ 
-              ...styles.navLabel, 
-              color: activeTab === 'propiedades' && !selectedPropertyDetail ? '#4f46e5' : '#94a3b8', 
-              fontWeight: activeTab === 'propiedades' && !selectedPropertyDetail ? '700' : '600' 
+            className="app-nav-btn"
+            style={styles.navBtn} 
+            onClick={() => {
+              setSelectedPropertyDetail(null);
+              setSelectedRoomDetail(null);
+              setActiveTab('home');
             }}
           >
-            Propiedades
-          </span>
-          {activeTab === 'propiedades' && !selectedPropertyDetail && <span style={styles.navActiveDot} />}
-        </button>
-      </nav>
+            <Home 
+              size={26} 
+              color={activeTab === 'home' && !selectedPropertyDetail ? '#4f46e5' : '#94a3b8'} 
+              strokeWidth={activeTab === 'home' && !selectedPropertyDetail ? 2.4 : 1.8} 
+            />
+            <span 
+              className="app-nav-label"
+              style={{ 
+                ...styles.navLabel, 
+                color: activeTab === 'home' && !selectedPropertyDetail ? '#4f46e5' : '#94a3b8', 
+                fontWeight: activeTab === 'home' && !selectedPropertyDetail ? '700' : '600' 
+              }}
+            >
+              Home
+            </span>
+            {activeTab === 'home' && !selectedPropertyDetail && <span style={styles.navActiveDot} />}
+          </button>
+
+          {/* 2. Botón Central: Crear (+) Negro, Minimalista y Proporcionado */}
+          <div className="app-fab-wrapper" style={styles.fabWrapper}>
+            <button 
+              className="app-fab-button"
+              style={styles.fabButton} 
+              onClick={() => setIsModalOpen(true)}
+              aria-label="Crear propiedad"
+            >
+              <Plus size={26} color="#ffffff" strokeWidth={2.4} />
+            </button>
+          </div>
+
+          {/* 3. Tab Propiedades */}
+          <button 
+            className="app-nav-btn"
+            style={styles.navBtn} 
+            onClick={() => {
+              setSelectedPropertyDetail(null);
+              setSelectedRoomDetail(null);
+              setActiveTab('propiedades');
+            }}
+          >
+            <Building2 
+              size={26} 
+              color={activeTab === 'propiedades' && !selectedPropertyDetail ? '#4f46e5' : '#94a3b8'} 
+              strokeWidth={activeTab === 'propiedades' && !selectedPropertyDetail ? 2.4 : 1.8} 
+            />
+            <span 
+              className="app-nav-label"
+              style={{ 
+                ...styles.navLabel, 
+                color: activeTab === 'propiedades' && !selectedPropertyDetail ? '#4f46e5' : '#94a3b8', 
+                fontWeight: activeTab === 'propiedades' && !selectedPropertyDetail ? '700' : '600' 
+              }}
+            >
+              Propiedades
+            </span>
+            {activeTab === 'propiedades' && !selectedPropertyDetail && <span style={styles.navActiveDot} />}
+          </button>
+        </nav>
+      )}
 
       {/* ============ MODAL 1: CREAR PROPIEDAD (MODAL COMPLETO CON IA / LINK O MANUAL) ============ */}
       {isModalOpen && (
@@ -8786,40 +8874,52 @@ const styles = {
     justifyContent: 'flex-end',
   },
   menuDrawer: {
-    width: '280px',
+    width: '300px',
     height: '100%',
     maxHeight: '100%',
     backgroundColor: '#ffffff',
-    padding: 'calc(env(safe-area-inset-top, 0px) + 24px) 20px calc(env(safe-area-inset-bottom, 0px) + 24px) 20px',
-    boxShadow: '-4px 0 24px rgba(0, 0, 0, 0.1)',
+    padding: 0,
+    boxShadow: '-4px 0 28px rgba(0, 0, 0, 0.15)',
     display: 'flex',
     flexDirection: 'column',
-    gap: '20px',
     overflowY: 'auto',
     WebkitOverflowScrolling: 'touch',
+    zIndex: 2000,
   },
-  menuHeader: {
+  menuHeaderBanner: {
+    background: 'linear-gradient(135deg, #4D66FE 0%, #6366f1 100%)',
+    padding: 'calc(env(safe-area-inset-top, 0px) + 20px) 20px 20px 20px',
     display: 'flex',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingBottom: '12px',
-    borderBottom: '1px solid #f1f5f9',
+    justifyContent: 'center',
+    position: 'relative',
   },
-  menuTitle: {
-    fontSize: '16px',
-    fontWeight: '700',
-    color: '#0f172a',
+  menuLogoWrap: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuLogoImage: {
+    height: '32px',
+    objectFit: 'contain',
   },
   menuCloseBtn: {
-    background: 'none',
+    position: 'absolute',
+    right: '16px',
+    top: 'calc(env(safe-area-inset-top, 0px) + 18px)',
+    background: 'rgba(255, 255, 255, 0.2)',
     border: 'none',
+    borderRadius: '8px',
+    padding: '6px',
     cursor: 'pointer',
     display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   menuContent: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '12px',
+    padding: '0 0 24px 0',
   },
   menuActionBtn: {
     width: '100%',
@@ -8833,29 +8933,27 @@ const styles = {
     textAlign: 'left',
     cursor: 'pointer',
   },
-  drawerUserCard: {
-    padding: '12px 14px',
-    borderRadius: '14px',
-    backgroundColor: '#f8fafc',
-    border: '1px solid #e2e8f0',
+  drawerUserSection: {
     display: 'flex',
     alignItems: 'center',
-    gap: '12px',
-    marginBottom: '14px',
+    gap: '14px',
+    padding: '18px 20px',
+    backgroundColor: '#ffffff',
+    borderBottom: '1px solid #f1f5f9',
+    marginBottom: '8px',
   },
   drawerUserAvatar: {
-    width: '40px',
-    height: '40px',
+    width: '46px',
+    height: '46px',
     borderRadius: '12px',
-    backgroundColor: '#0f172a',
+    backgroundColor: '#4D66FE',
     color: '#ffffff',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    fontSize: '14px',
+    fontSize: '18px',
     fontWeight: '700',
     flexShrink: 0,
-    marginRight: '12px',
   },
   drawerUserInfo: {
     display: 'flex',
@@ -8863,17 +8961,19 @@ const styles = {
     minWidth: 0,
   },
   drawerUserName: {
-    fontSize: '13.5px',
+    fontSize: '15px',
     fontWeight: '700',
     color: '#0f172a',
+    margin: 0,
     whiteSpace: 'nowrap',
     textOverflow: 'ellipsis',
     overflow: 'hidden',
   },
   drawerUserEmail: {
-    fontSize: '12px',
-    fontWeight: '500',
+    fontSize: '13px',
+    fontWeight: '400',
     color: '#64748b',
+    margin: 0,
     whiteSpace: 'nowrap',
     textOverflow: 'ellipsis',
     overflow: 'hidden',
@@ -8882,27 +8982,29 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: '4px',
+    padding: '4px 16px',
   },
   drawerNavBtn: {
     width: '100%',
     height: '44px',
-    padding: '0 12px',
-    borderRadius: '12px',
+    padding: '0 14px',
+    borderRadius: '10px',
     border: 'none',
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
-    fontSize: '13.5px',
+    fontSize: '14.5px',
+    fontWeight: '500',
     cursor: 'pointer',
     transition: 'all 0.15s ease',
   },
   drawerDivider: {
     height: '1px',
     backgroundColor: '#f1f5f9',
-    margin: '12px 0',
+    margin: '12px 16px',
   },
   drawerLogoutBtn: {
-    width: '100%',
+    margin: '0 16px',
     height: '44px',
     padding: '0 14px',
     borderRadius: '12px',
@@ -8912,8 +9014,8 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '10px',
-    fontSize: '13px',
-    fontWeight: '700',
+    fontSize: '14px',
+    fontWeight: '600',
     cursor: 'pointer',
     transition: 'all 0.15s ease',
   },

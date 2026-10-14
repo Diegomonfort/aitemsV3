@@ -20,7 +20,15 @@ export function AuthProvider({ children }) {
 
     try {
       // 1. Consultar endpoint protegido del backend
-      const res = await api.get('/api/users/profile');
+      const res = await api.get('/api/users/profile', { timeout: 7000 });
+
+      if (res?.code === 'ACCOUNT_DELETED' || (res?.status === 403 && res?.code === 'ACCOUNT_DELETED') || res?.data?.user?.deleted === true) {
+        await authService.signOut();
+        setUser(null);
+        setAgency(null);
+        setSession(null);
+        return { success: false, code: 'ACCOUNT_DELETED', error: res?.message || 'Cuenta eliminada' };
+      }
 
       if (res?.code === 'AGENT_PLAN_RESTRICTED' || (res?.status === 403 && res?.code === 'AGENT_PLAN_RESTRICTED')) {
         await authService.signOut();
