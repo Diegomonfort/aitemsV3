@@ -34,7 +34,6 @@ export default function OwnerDashboard({
   onUpdatePlan,
   agents = [],
   onAddAgent,
-  onRemoveAgent,
   onResendInvite,
 }) {
   const safeAgents = Array.isArray(agents) ? agents : [];
@@ -43,7 +42,6 @@ export default function OwnerDashboard({
   const [isEditAgencyOpen, setIsEditAgencyOpen] = useState(false);
   const [isInviteAgentOpen, setIsInviteAgentOpen] = useState(false);
   const [isManagePlanOpen, setIsManagePlanOpen] = useState(false);
-  const [agentToRemove, setAgentToRemove] = useState(null);
 
   // Formulario Editar Inmobiliaria
   const [formAgencyName, setFormAgencyName] = useState(agency?.name || '');
@@ -256,14 +254,6 @@ export default function OwnerDashboard({
     setIsSubmittingInvite(false);
   };
 
-  const handleConfirmRemoveAgent = () => {
-    if (agentToRemove) {
-      onRemoveAgent(agentToRemove.id);
-      showToast(`${agentToRemove.name} removido de la inmobiliaria`);
-      setAgentToRemove(null);
-    }
-  };
-
   return (
     <main key="dashboard-view" className="app-main-content" style={styles.container}>
 
@@ -430,8 +420,8 @@ export default function OwnerDashboard({
                 </div>
 
                 {/* Acciones */}
-                <div style={styles.agentRowActions}>
-                  {isPending && (
+                {isPending && (
+                  <div style={styles.agentRowActions}>
                     <button 
                       type="button" 
                       style={styles.resendActionBtn}
@@ -443,19 +433,8 @@ export default function OwnerDashboard({
                     >
                       <RotateCw size={12} color="#4f46e5" />
                     </button>
-                  )}
-
-                  {!isOwner && (
-                    <button 
-                      type="button" 
-                      style={styles.deleteActionBtn}
-                      onClick={() => setAgentToRemove({ id: agent.id, name: agent.name })}
-                      title="Eliminar"
-                    >
-                      <Trash2 size={13} color="#94a3b8" />
-                    </button>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1062,84 +1041,6 @@ export default function OwnerDashboard({
         </BottomSheet>
       )}
 
-      {/* =========================================================================
-          MODAL: CONFIRMAR QUITAR INSPECTOR / COLEGA
-          ========================================================================= */}
-      {agentToRemove && (
-        <BottomSheet
-          isOpen={!!agentToRemove}
-          onClose={() => setAgentToRemove(null)}
-          title="Quitar del equipo"
-          size="auto"
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '12px', padding: '10px 0' }}>
-            <div style={{
-              width: '48px',
-              height: '48px',
-              borderRadius: '14px',
-              backgroundColor: '#fee2e2',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}>
-              <Trash2 size={24} color="#dc2626" strokeWidth={2.2} />
-            </div>
-
-            <div>
-              <h4 style={{ fontSize: '16px', fontWeight: '800', color: '#0f172a', margin: '0 0 6px 0' }}>
-                ¿Quitar a {agentToRemove.name}?
-              </h4>
-              <p style={{ fontSize: '13.5px', color: '#64748b', lineHeight: '1.45', margin: 0 }}>
-                Ya no formará parte de la inmobiliaria ni tendrá permisos para realizar inventarios.
-              </p>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '9px', width: '100%', marginTop: '6px' }}>
-              <button
-                type="button"
-                style={{
-                  width: '100%',
-                  height: '44px',
-                  borderRadius: '12px',
-                  backgroundColor: '#fee2e2',
-                  color: '#dc2626',
-                  border: '1px solid #fca5a5',
-                  fontSize: '14px',
-                  fontWeight: '700',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px',
-                  cursor: 'pointer'
-                }}
-                onClick={handleConfirmRemoveAgent}
-              >
-                <Trash2 size={16} />
-                <span>Quitar del equipo</span>
-              </button>
-
-              <button
-                type="button"
-                style={{
-                  width: '100%',
-                  height: '42px',
-                  borderRadius: '12px',
-                  backgroundColor: '#f8fafc',
-                  color: '#475569',
-                  border: '1px solid #cbd5e1',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  cursor: 'pointer'
-                }}
-                onClick={() => setAgentToRemove(null)}
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </BottomSheet>
-      )}
-
     </main>
   );
 }
@@ -1455,17 +1356,6 @@ const styles = {
     borderRadius: '6px',
     border: 'none',
     backgroundColor: '#eef2ff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-  },
-  deleteActionBtn: {
-    width: '28px',
-    height: '28px',
-    borderRadius: '6px',
-    border: 'none',
-    backgroundColor: 'transparent',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',

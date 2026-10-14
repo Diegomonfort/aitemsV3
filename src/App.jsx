@@ -78,6 +78,7 @@ import { photoUploadService } from './services/photoUploadService';
 import { filterAndPreparePhotos, formatFileSize } from './utils/imageOptimizer';
 import PhotoUploadProgress from './components/PhotoUploadProgress';
 import BottomSheet from './components/BottomSheet';
+import PullToRefresh from './components/PullToRefresh';
 import { api } from './services/api';
 import { photoService } from './services/photoService';
 import { isNativePlatform, takeMultiplePhotos, pickFromGallery } from './utils/nativeCamera';
@@ -471,15 +472,6 @@ export default function App() {
     setAgents(prev => [newAgent, ...prev]);
   };
 
-  const handleRemoveAgent = async (agentId) => {
-    setAgents(prev => prev.filter(a => a.id !== agentId));
-    try {
-      await agencyService.cancelInvitation(agentId);
-    } catch (err) {
-      // Silencioso si no es invitación pendiente
-    }
-  };
-
   const handleResendInvite = async (agentId) => {
     // Confirmación visual
   };
@@ -655,17 +647,40 @@ export default function App() {
     loadAgencyInfo();
   }, [loadProperties, loadColleagues, loadAgencyInfo]);
 
+  // Pull-to-refresh unificado (recarga propiedades, recientes, colegas, info de inmobiliaria y propiedad activa)
+  const handlePullToRefresh = useCallback(async () => {
+    try {
+      const promises = [
+        loadProperties(),
+        loadColleagues(),
+        loadAgencyInfo(),
+      ];
+      if (selectedPropertyDetail?.id) {
+        promises.push((async () => {
+          try {
+            const res = await propertyService.getPropertyById(selectedPropertyDetail.id);
+            const updated = res.property || res.data?.property || res;
+            if (updated && updated.id) {
+              setSelectedPropertyDetail(prev => ({ ...prev, ...updated }));
+            }
+          } catch (e) {
+            console.warn('[handlePullToRefresh] Error refrescando propiedad activa:', e);
+          }
+        })());
+      }
+      await Promise.allSettled(promises);
+    } catch (e) {
+      console.warn('[handlePullToRefresh] Error en pull-to-refresh:', e);
+    }
+  }, [loadProperties, loadColleagues, loadAgencyInfo, selectedPropertyDetail?.id]);
+
   // Registrar handler para pull-to-refresh nativo de iOS
   useEffect(() => {
-    window.onNativePullToRefresh = () => {
-      loadProperties();
-      loadColleagues();
-      loadAgencyInfo();
-    };
+    window.onNativePullToRefresh = handlePullToRefresh;
     return () => {
       delete window.onNativePullToRefresh;
     };
-  }, [loadProperties, loadColleagues, loadAgencyInfo]);
+  }, [handlePullToRefresh]);
 
 
   const handleLogin = (userData) => {
@@ -1139,18 +1154,29 @@ export default function App() {
   const [newCustomMoveRoom, setNewCustomMoveRoom] = useState('');
   const [isDeletingPhotosModal, setIsDeletingPhotosModal] = useState(false);
 
-  // Deshabilitar pull-to-refresh nativo cuando hay un overlay abierto
+  // Deshabilitar pull-to-refresh cuando hay un overlay abierto (modal, cámara, selector, etc.)
+  const isAnyOverlayOpen = Boolean(
+    isMenuOpen ||
+    isCameraOpen ||
+    isModalOpen ||
+    isEditPropertyModalOpen ||
+    isDeletePropertyModalOpen ||
+    isExportPdfModalOpen ||
+    isShareModalOpen ||
+    selectedPhotoModal ||
+    isAddingPhotosModal ||
+    isFloorPlanEditorOpen ||
+    quickActionType ||
+    isMovingPhotosModal ||
+    isDeletingPhotosModal ||
+    authView !== 'app'
+  );
+
   useEffect(() => {
-    const anyOverlayOpen = isMenuOpen || isCameraOpen || isModalOpen || isEditPropertyModalOpen 
-      || isDeletePropertyModalOpen || isExportPdfModalOpen || isShareModalOpen 
-      || selectedPhotoModal || isAddingPhotosModal || isFloorPlanEditorOpen;
-    // Comunicar directamente al nativo de iOS
     try {
-      window.webkit?.messageHandlers?.pullToRefresh?.postMessage({ enabled: !anyOverlayOpen });
+      window.webkit?.messageHandlers?.pullToRefresh?.postMessage({ enabled: !isAnyOverlayOpen });
     } catch (e) { /* no estamos en iOS */ }
-  }, [isMenuOpen, isCameraOpen, isModalOpen, isEditPropertyModalOpen, 
-      isDeletePropertyModalOpen, isExportPdfModalOpen, isShareModalOpen, 
-      selectedPhotoModal, isAddingPhotosModal, isFloorPlanEditorOpen]);
+  }, [isAnyOverlayOpen]);
 
   useEffect(() => {
     if (!selectedPhotoModal) return;
@@ -3371,6 +3397,9 @@ export default function App() {
 
   return (
     <div className="app-container" style={styles.appContainer}>
+      {/* Pull To Refresh suave y nativo para Android y navegadores móviles */}
+      <PullToRefresh onRefresh={handlePullToRefresh} disabled={isAnyOverlayOpen} />
+
       {/* ============ TOP BAR ============ */}
       {activeTab !== 'ajustes' && (
         <header className="app-top-bar" style={styles.topBar}>
@@ -4096,7 +4125,6 @@ export default function App() {
           onUpdatePlan={handleUpdatePlan}
           agents={agents}
           onAddAgent={handleAddAgent}
-          onRemoveAgent={handleRemoveAgent}
           onResendInvite={handleResendInvite}
           userRole={userRole}
         />
