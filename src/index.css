@@ -5,6 +5,15 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+button {
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  border: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 /* Camera flash animation */
 @keyframes camFlash {
   0% { opacity: 0.9; }
@@ -35,6 +44,13 @@ html, body, #root {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   color: var(--slate-900);
+}
+
+/* En Android desactivamos el overscroll nativo para que PullToRefresh.jsx
+   funcione de forma suave y sin conflictos con el pull-to-refresh de Chromium */
+html.platform-android,
+body.platform-android,
+.platform-android #root {
   overscroll-behavior-y: none;
 }
 

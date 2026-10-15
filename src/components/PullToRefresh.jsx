@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
 
 /**
  * Componente Pull-To-Refresh suave y elegante para Android y navegadores móviles.
  * Emula el comportamiento nativo de Android (Material Refresh) con soporte
  * para contenedores scrollables internos (SPA), detección precisa de inicio y
  * prevención estricta de conflictos con modales, carruseles o scroll hacia arriba.
+ * En iOS se utiliza el UIRefreshControl nativo de UIKit configurado en SceneDelegate.swift.
  */
 export default function PullToRefresh({ onRefresh, disabled = false, threshold = 65 }) {
   const [pullDistance, setPullDistance] = useState(0);
@@ -36,9 +38,9 @@ export default function PullToRefresh({ onRefresh, disabled = false, threshold =
   }, [isRefreshing]);
 
   useEffect(() => {
-    // Si estamos en iOS con PullToRefreshViewController nativo, dejamos que iOS lo maneje de forma nativa
-    const isIOSNative = typeof window !== 'undefined' && Boolean(window.webkit?.messageHandlers?.pullToRefresh);
-    if (isIOSNative) return;
+    // Si estamos en iOS (Capacitor nativo o con handler de iOS), dejamos que iOS lo maneje 100% de forma nativa
+    const isIOS = Capacitor.getPlatform() === 'ios' || (typeof window !== 'undefined' && Boolean(window.webkit?.messageHandlers?.pullToRefresh));
+    if (isIOS) return;
 
     // Helper: Encuentra el ancestro scrollable más cercano al elemento tocado
     const findScrollableAncestor = (element) => {
@@ -209,7 +211,8 @@ export default function PullToRefresh({ onRefresh, disabled = false, threshold =
     };
   }, [threshold]);
 
-  if (pullDistance <= 0 && !isRefreshing) {
+  const isIOSPlatform = Capacitor.getPlatform() === 'ios' || (typeof window !== 'undefined' && Boolean(window.webkit?.messageHandlers?.pullToRefresh));
+  if (isIOSPlatform || (pullDistance <= 0 && !isRefreshing)) {
     return null;
   }
 

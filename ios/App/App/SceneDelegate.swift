@@ -6,6 +6,7 @@ import AVFoundation
 class PullToRefreshViewController: CAPBridgeViewController, WKScriptMessageHandler {
 
     private let refreshControl = UIRefreshControl()
+    private var isPullToRefreshEnabled: Bool = true
     private var audioRecorder: AVAudioRecorder?
     private var audioFileURL: URL?
 
@@ -32,9 +33,10 @@ class PullToRefreshViewController: CAPBridgeViewController, WKScriptMessageHandl
         // NO ajustar content inset
         webView?.scrollView.contentInsetAdjustmentBehavior = .never
 
-        // Agregar refresh control
+        // Agregar refresh control y habilitar rebote vertical continuo
         webView?.scrollView.refreshControl = refreshControl
         webView?.scrollView.bounces = true
+        webView?.scrollView.alwaysBounceVertical = true
 
         // Registrar message handlers
         webView?.configuration.userContentController.add(self, name: "pullToRefresh")
@@ -45,11 +47,11 @@ class PullToRefreshViewController: CAPBridgeViewController, WKScriptMessageHandl
         if message.name == "pullToRefresh" {
             if let body = message.body as? [String: Any], let enabled = body["enabled"] as? Bool {
                 DispatchQueue.main.async { [weak self] in
-                    if enabled {
-                        self?.webView?.scrollView.refreshControl = self?.refreshControl
-                    } else {
-                        self?.refreshControl.endRefreshing()
-                        self?.webView?.scrollView.refreshControl = nil
+                    guard let self = self else { return }
+                    self.isPullToRefreshEnabled = enabled
+                    self.refreshControl.isEnabled = enabled
+                    if !enabled && self.refreshControl.isRefreshing {
+                        self.refreshControl.endRefreshing()
                     }
                 }
             }
@@ -166,6 +168,10 @@ class PullToRefreshViewController: CAPBridgeViewController, WKScriptMessageHandl
     // ── Pull to Refresh ──
 
     @objc private func handleRefresh(_ sender: UIRefreshControl) {
+        guard isPullToRefreshEnabled else {
+            sender.endRefreshing()
+            return
+        }
         webView?.evaluateJavaScript("""
             if (window.onNativePullToRefresh) {
                 window.onNativePullToRefresh();

@@ -1,17 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  ArrowLeft, 
-  Shield, 
-  HelpCircle, 
-  Info, 
-  Pencil, 
-  Trash2, 
-  ChevronRight, 
-  Mail, 
-  MessageCircle, 
-  AlertTriangle, 
-  ExternalLink, 
-  Check, 
+import {
+  ArrowLeft,
+  Shield,
+  HelpCircle,
+  Info,
+  Pencil,
+  Trash2,
+  ChevronRight,
+  Mail,
+  MessageCircle,
+  AlertTriangle,
+  ExternalLink,
+  Check,
   MapPin,
   X,
   Loader2
@@ -25,7 +25,7 @@ import { userService } from '../services/userService';
 const FAQ_ITEMS = [
   {
     question: "¿Cómo creo un inventario?",
-    answer: "El proceso es simple: Primero crea una Propiedad. Dentro de ella, añade Ambientes (ej: Cocina, Baño). Finalmente, entra en cada ambiente y agrega los Ítems tanto por voz, como con fotos o IA."
+    answer: "El proceso es simple: Primero crea una Propiedad. Dentro de ella, añade Ambientes (ej: Cocina, Baño). Finalmente, entra en cada ambiente y agrega los Ítems tanto por voz, como con fotos."
   },
   {
     question: "¿Puedo personalizar el reporte PDF?",
@@ -37,7 +37,7 @@ const FAQ_ITEMS = [
   },
   {
     question: "¿Cómo funciona el editor de planos?",
-    answer: "Puedes subir un plano existente o trazar habitaciones desde cero. El editor te permite dibujar paredes, añadir puertas, ventanas y mobiliario con medidas automáticas."
+    answer: "El editor te permite dibujar paredes, añadir puertas, ventanas, asignar ambientes y exportarlo para que tus clientes vean un plano interactivo al presentar el informe."
   },
   {
     question: "¿Cómo cambio o gestiono mi plan?",
@@ -199,8 +199,8 @@ export default function AjustesScreen({
     <div style={styles.container}>
       {/* ============ HEADER ============ */}
       <header style={styles.header}>
-        <button 
-          style={styles.backBtn} 
+        <button
+          style={styles.backBtn}
           onClick={onBack}
           aria-label="Volver"
         >
@@ -220,8 +220,8 @@ export default function AjustesScreen({
             <h2 style={styles.userName}>{currentUser?.name || 'Diego M'}</h2>
             <p style={styles.userSubtitle}>{agency?.name || 'Real State Diego'}</p>
           </div>
-          <button 
-            style={styles.editBtn} 
+          <button
+            style={styles.editBtn}
             onClick={() => setIsEditProfileOpen(true)}
             aria-label="Editar perfil"
           >
@@ -232,10 +232,10 @@ export default function AjustesScreen({
         {/* ============ TARJETA INMOBILIARIA ============ */}
         <section style={styles.agencyCard}>
           <div style={styles.agencyLogoWrap}>
-            <img 
-              src={agency?.logo || logoColor} 
-              alt={agency?.name || 'Inmobiliaria'} 
-              style={styles.agencyLogo} 
+            <img
+              src={agency?.logo || logoColor}
+              alt={agency?.name || 'Inmobiliaria'}
+              style={styles.agencyLogo}
             />
           </div>
           <div style={styles.agencyInfo}>
@@ -253,9 +253,9 @@ export default function AjustesScreen({
         </div>
 
         <div style={styles.groupedCard}>
-          <button 
-            type="button" 
-            style={styles.groupItem} 
+          <button
+            type="button"
+            style={styles.groupItem}
             onClick={() => setIsTermsOpen(true)}
           >
             <div style={styles.groupItemLeft}>
@@ -267,9 +267,9 @@ export default function AjustesScreen({
 
           <div style={styles.itemDivider} />
 
-          <button 
-            type="button" 
-            style={styles.groupItem} 
+          <button
+            type="button"
+            style={styles.groupItem}
             onClick={() => setIsSupportOpen(true)}
           >
             <div style={styles.groupItemLeft}>
@@ -281,9 +281,9 @@ export default function AjustesScreen({
 
           <div style={styles.itemDivider} />
 
-          <button 
-            type="button" 
-            style={styles.groupItem} 
+          <button
+            type="button"
+            style={styles.groupItem}
             onClick={() => setIsHelpOpen(true)}
           >
             <div style={styles.groupItemLeft}>
@@ -300,9 +300,9 @@ export default function AjustesScreen({
         </div>
 
         <div style={styles.groupedCardDanger}>
-          <button 
-            type="button" 
-            style={styles.groupItemDanger} 
+          <button
+            type="button"
+            style={styles.groupItemDanger}
             onClick={() => setIsDeleteAccountOpen(true)}
           >
             <div style={styles.groupItemLeft}>

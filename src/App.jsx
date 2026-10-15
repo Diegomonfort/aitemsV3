@@ -78,6 +78,7 @@ import { photoUploadService } from './services/photoUploadService';
 import { filterAndPreparePhotos, formatFileSize } from './utils/imageOptimizer';
 import PhotoUploadProgress from './components/PhotoUploadProgress';
 import BottomSheet from './components/BottomSheet';
+import { Capacitor } from '@capacitor/core';
 import PullToRefresh from './components/PullToRefresh';
 import { api } from './services/api';
 import { photoService } from './services/photoService';
@@ -3397,8 +3398,10 @@ export default function App() {
 
   return (
     <div className="app-container" style={styles.appContainer}>
-      {/* Pull To Refresh suave y nativo para Android y navegadores móviles */}
-      <PullToRefresh onRefresh={handlePullToRefresh} disabled={isAnyOverlayOpen} />
+      {/* Pull To Refresh táctil para Android (en iOS se utiliza UIRefreshControl nativo de UIKit) */}
+      {Capacitor.getPlatform() !== 'ios' && (
+        <PullToRefresh onRefresh={handlePullToRefresh} disabled={isAnyOverlayOpen} />
+      )}
 
       {/* ============ TOP BAR ============ */}
       {activeTab !== 'ajustes' && (
@@ -3537,7 +3540,12 @@ export default function App() {
 
                 <button 
                   type="button"
-                  style={styles.drawerNavBtn}
+                  style={{
+                    ...styles.drawerNavBtn,
+                    backgroundColor: 'transparent',
+                    color: '#475569',
+                    fontWeight: '600',
+                  }}
                   onClick={() => {
                     setSelectedPropertyDetail(null);
                     setSelectedRoomDetail(null);
@@ -9018,11 +9026,13 @@ const styles = {
     padding: '0 14px',
     borderRadius: '10px',
     border: 'none',
+    backgroundColor: 'transparent',
+    color: '#475569',
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
     fontSize: '14.5px',
-    fontWeight: '500',
+    fontWeight: '600',
     cursor: 'pointer',
     transition: 'all 0.15s ease',
   },
