@@ -227,7 +227,9 @@ export default function CreatePropertyModal({
       };
 
       if (onSubmit) {
-        await onSubmit(payload);
+        const result = await onSubmit(payload);
+        // Si el handler indica fallo (ej: límite del plan), no cerrar el modal
+        if (result === false) return;
       }
       handleClose();
     } catch (err) {

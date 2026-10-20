@@ -51,7 +51,8 @@ import {
   History,
   Settings,
   HelpCircle,
-  User
+  User,
+  Lock
 } from 'lucide-react';
 import logo from './assets/logo-color.png';
 import logoBlanco from './assets/logo-blanco_v1.png';
@@ -199,15 +200,19 @@ const PropertyCardItem = React.memo(({ item, onOpen, placeholder, styles }) => {
   const isShared = Boolean(item.isShared || item.is_shared);
   const sharedCount = item.sharedCount || item.sharedUsers?.length || item.shared_users?.length || 0;
   const isSharedByMe = Boolean(!isShared && sharedCount > 0);
+  // Propiedad bloqueada porque el plan actual no cubre su cupo (access=false)
+  const isBlocked = item.access === false;
 
   return (
     <div 
       className="app-property-list-item"
       style={{ 
         ...styles.propertyListItem, 
-        cursor: 'pointer',
+        cursor: isBlocked ? 'not-allowed' : 'pointer',
+        ...(isBlocked ? { opacity: 0.6, backgroundColor: '#f8fafc' } : {}),
       }}
       onClick={() => onOpen(item)}
+      aria-disabled={isBlocked}
     >
       <div style={{ position: 'relative', width: '64px', height: '64px', flexShrink: 0 }}>
         <img 
@@ -256,18 +261,39 @@ const PropertyCardItem = React.memo(({ item, onOpen, placeholder, styles }) => {
               <span>({sharedCount})</span>
             </span>
           )}
+          {isBlocked && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '2px 8px',
+                borderRadius: '6px',
+                background: 'rgba(239, 68, 68, 0.12)',
+                color: '#dc2626',
+                fontSize: '11px',
+                fontWeight: 700,
+              }}
+              title="No disponible en tu plan actual"
+            >
+              <Lock size={11} strokeWidth={2.6} />
+              Sin acceso
+            </span>
+          )}
         </div>
       </div>
-      <button 
-        style={styles.adminMiniBtn}
-        onClick={(e) => {
-          e.stopPropagation();
-          onOpen(item);
-        }}
-      >
-        <span>Abrir</span>
-        <ChevronRight size={14} color="#4f46e5" />
-      </button>
+      {!isBlocked && (
+        <button 
+          style={styles.adminMiniBtn}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen(item);
+          }}
+        >
+          <span>Abrir</span>
+          <ChevronRight size={14} color="#4f46e5" />
+        </button>
+      )}
     </div>
   );
 });
@@ -298,11 +324,15 @@ const FloatingBackToTop = React.memo(({ styles }) => {
     <button
       type="button"
       style={styles.backToTopFab}
-      onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+      onClick={() => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        const main = document.querySelector('.app-main-content');
+        if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
+      }}
       title="Volver arriba"
       aria-label="Volver arriba"
     >
-      <ArrowUp size={16} color="#ffffff" strokeWidth={2.5} />
+      <ArrowUp size={15} color="#ffffff" strokeWidth={2.5} />
       <span style={styles.backToTopFabText}>Arriba</span>
     </button>
   );
@@ -429,10 +459,31 @@ export default function App() {
   const [properties, setProperties] = useState([]);
   const [recentProperties, setRecentProperties] = useState([]);
   const [isLoadingProperties, setIsLoadingProperties] = useState(true);
+  const [isLoadingMoreProperties, setIsLoadingMoreProperties] = useState(false);
   const [hasInitialPropertiesLoaded, setHasInitialPropertiesLoaded] = useState(false);
   const [isLoadingPropertyDetail, setIsLoadingPropertyDetail] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  // Paginación y ámbitos del servidor para optimizar consumo de red y recursos en mobile
+  const [propertiesPagination, setPropertiesPagination] = useState({
+    page: 1,
+    limit: 12,
+    total: 0,
+    totalPages: 1,
+    hasMore: false,
+  });
+  const [propertiesScopeCounts, setPropertiesScopeCounts] = useState({
+    all: 0,
+    mine: 0,
+    shared: 0,
+  });
+  const [propertyFilterScope, setPropertyFilterScope] = useState('propias'); // 'propias' | 'compartidas'
+  const [tabSearchQuery, setTabSearchQuery] = useState('');
+  const propertyFilterScopeRef = useRef(propertyFilterScope);
+  propertyFilterScopeRef.current = propertyFilterScope;
+  const tabSearchQueryRef = useRef(tabSearchQuery);
+  tabSearchQueryRef.current = tabSearchQuery;
 
   const handleUpdateAgency = async (updatedAgency) => {
     setAgency(prev => ({ ...prev, ...updatedAgency }));
@@ -525,43 +576,101 @@ export default function App() {
     }
   }, [authAgency]);
 
-  // Cargar propiedades reales del backend (todas y las 3 más recientes)
-  const loadProperties = useCallback(async () => {
+  // Cargar propiedades reales del backend con paginación inteligente (12 por lote para no consumir recursos excesivos en mobile)
+  const loadProperties = useCallback(async (opts = {}) => {
     if (!isAuthenticated) {
       setHasInitialPropertiesLoaded(true);
       return;
     }
-    setIsLoadingProperties(true);
-    try {
-      // 1 y 2. Cargar propiedades y recientes en paralelo para máxima velocidad
-      const [allRes, recentRes] = await Promise.allSettled([
-        propertyService.getProperties(),
-        propertyService.getRecentProperties(),
-      ]);
+    const targetPage = opts.page !== undefined ? opts.page : 1;
+    const isNextPage = targetPage > 1;
+    const limit = opts.limit || 12;
+    const scope = opts.scope !== undefined ? opts.scope : propertyFilterScopeRef.current;
+    const search = opts.search !== undefined ? opts.search : tabSearchQueryRef.current;
 
-      let allProps = [];
-      if (allRes.status === 'fulfilled' && allRes.value) {
-        allProps = allRes.value.properties || allRes.value.data?.properties || [];
-        if (Array.isArray(allProps)) {
-          setProperties(allProps);
+    if (isNextPage) {
+      setIsLoadingMoreProperties(true);
+    } else {
+      setIsLoadingProperties(true);
+    }
+
+    try {
+      const params = {
+        page: targetPage,
+        limit,
+        tab: scope === 'compartidas' ? 'compartidas' : 'propias',
+      };
+      if (search && search.trim()) {
+        params.search = search.trim();
+      }
+
+      // En la primera carga de la página 1, traemos también las recientes para el carrusel de Home
+      const promises = [propertyService.getProperties(params)];
+      if (!isNextPage) {
+        promises.push(propertyService.getRecentProperties());
+      }
+
+      const results = await Promise.allSettled(promises);
+      const propsRes = results[0];
+      const recentRes = results[1];
+
+      let fetchedProps = [];
+      if (propsRes.status === 'fulfilled' && propsRes.value) {
+        const val = propsRes.value;
+        fetchedProps = val.properties || val.data?.properties || [];
+        if (Array.isArray(fetchedProps)) {
+          if (isNextPage) {
+            setProperties(prev => {
+              const existingIds = new Set(prev.map(p => p.id));
+              const uniqueItems = fetchedProps.filter(p => !existingIds.has(p.id));
+              return [...prev, ...uniqueItems];
+            });
+          } else {
+            setProperties(fetchedProps);
+          }
+        }
+
+        if (val.pagination) {
+          setPropertiesPagination({
+            page: val.pagination.page || targetPage,
+            limit: val.pagination.limit || limit,
+            total: val.pagination.total !== undefined ? val.pagination.total : fetchedProps.length,
+            totalPages: val.pagination.totalPages || 1,
+            hasMore: Boolean(val.pagination.hasMore),
+          });
+        } else {
+          setPropertiesPagination({
+            page: targetPage,
+            limit,
+            total: fetchedProps.length,
+            totalPages: 1,
+            hasMore: false,
+          });
+        }
+
+        if (val.scopeCounts) {
+          setPropertiesScopeCounts(val.scopeCounts);
         }
       }
 
-      let recentProps = [];
-      if (recentRes.status === 'fulfilled' && recentRes.value) {
-        recentProps = recentRes.value.recentProperties || recentRes.value.data?.recentProperties || [];
-      }
-
-      if (Array.isArray(recentProps) && recentProps.length > 0) {
-        setRecentProperties(recentProps);
-      } else if (Array.isArray(allProps) && allProps.length > 0) {
-        setRecentProperties(allProps.slice(0, 3));
+      if (recentRes && recentRes.status === 'fulfilled' && recentRes.value) {
+        const rVal = recentRes.value;
+        const recentProps = rVal.recentProperties || rVal.data?.recentProperties || [];
+        if (Array.isArray(recentProps) && recentProps.length > 0) {
+          setRecentProperties(recentProps);
+        }
+      } else if (!isNextPage && Array.isArray(fetchedProps) && fetchedProps.length > 0) {
+        setRecentProperties(prev => (prev.length > 0 ? prev : fetchedProps.slice(0, 3)));
       }
     } catch (err) {
       console.warn('Error cargando propiedades desde backend:', err);
     } finally {
-      setIsLoadingProperties(false);
-      setHasInitialPropertiesLoaded(true);
+      if (isNextPage) {
+        setIsLoadingMoreProperties(false);
+      } else {
+        setIsLoadingProperties(false);
+        setHasInitialPropertiesLoaded(true);
+      }
     }
   }, [isAuthenticated]);
 
@@ -752,6 +861,18 @@ export default function App() {
     setIsMenuOpen(false);
     setProperties([]);
     setRecentProperties([]);
+    setPropertiesPagination({
+      page: 1,
+      limit: 12,
+      total: 0,
+      totalPages: 1,
+      hasMore: false,
+    });
+    setPropertiesScopeCounts({
+      all: 0,
+      mine: 0,
+      shared: 0,
+    });
     setHasInitialPropertiesLoaded(false);
     setSelectedPropertyDetail(null);
     setSelectedRoomDetail(null);
@@ -800,11 +921,28 @@ export default function App() {
   const [propertyPage, setPropertyPage] = useState(1);
   const PROPERTIES_PER_PAGE = 5;
 
-  const filteredProperties = properties.filter((prop) => {
+  // Propiedades seleccionables para acciones rápidas (dictado / fotos / planos).
+  // Se cargan del endpoint liviano all-quick: sin bloqueadas (access=false) ni borradas,
+  // e independientes de la lista paginada de la pestaña Propiedades.
+  const [selectableProperties, setSelectableProperties] = useState([]);
+  const loadSelectableProperties = useCallback(async () => {
+    try {
+      const res = await propertyService.getAllQuick();
+      const list = res?.properties || res?.data?.properties || [];
+      if (Array.isArray(list)) setSelectableProperties(list);
+    } catch (err) {
+      console.warn('Error cargando propiedades seleccionables:', err);
+    }
+  }, []);
+  const selectorProperties = selectableProperties.length > 0
+    ? selectableProperties
+    : properties.filter((p) => p.access !== false);
+
+  const filteredProperties = selectorProperties.filter((prop) => {
     const q = propertySearchQuery.trim().toLowerCase();
     if (!q) return true;
     return (
-      prop.name.toLowerCase().includes(q) ||
+      (prop.name || '').toLowerCase().includes(q) ||
       (prop.address && prop.address.toLowerCase().includes(q))
     );
   });
@@ -816,88 +954,84 @@ export default function App() {
     safePage * PROPERTIES_PER_PAGE
   );
 
-  // Estado para la pestaña "Todas las propiedades" (Filtro, Orden y Carga Progresiva / Infinite Scroll)
-  const [tabSearchQuery, setTabSearchQuery] = useState('');
-  const deferredTabSearchQuery = useDeferredValue(tabSearchQuery);
+  // Estado para la pestaña "Todas las propiedades" (Filtro, Orden y Carga Progresiva / Infinite Scroll Server-Side)
   const [tabSortBy, setTabSortBy] = useState('recientes'); // 'recientes' | 'nombre-asc' | 'nombre-desc'
-  const [propertyFilterScope, setPropertyFilterScope] = useState('propias'); // 'propias' | 'compartidas'
-  const TAB_INITIAL_VISIBLE = 15;
-  const TAB_BATCH_SIZE = 15;
-  const [tabVisibleCount, setTabVisibleCount] = useState(TAB_INITIAL_VISIBLE);
   const tabSentinelRef = useRef(null);
+  const searchTimeoutRef = useRef(null);
 
   const currentUserId = authUser?.id || currentUser?.id;
 
+  // Handlers para búsqueda y cambio de alcance
+  const handleScopeChange = useCallback((newScope) => {
+    if (newScope === propertyFilterScopeRef.current) return;
+    setPropertyFilterScope(newScope);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    loadProperties({
+      page: 1,
+      scope: newScope,
+      search: tabSearchQueryRef.current,
+    });
+  }, [loadProperties]);
+
+  const handleSearchChange = useCallback((val) => {
+    setTabSearchQuery(val);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = setTimeout(() => {
+      loadProperties({
+        page: 1,
+        search: val,
+        scope: propertyFilterScopeRef.current,
+      });
+    }, 350);
+  }, [loadProperties]);
+
+  const handleClearSearch = useCallback(() => {
+    setTabSearchQuery('');
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    loadProperties({
+      page: 1,
+      search: '',
+      scope: propertyFilterScopeRef.current,
+    });
+  }, [loadProperties]);
+
   // Conteo de propiedades para las pestañas de alcance (Mis propiedades / Compartidas)
-  const { propertiesCountMine, propertiesCountShared } = useMemo(() => {
-    let mine = 0, shared = 0;
-    properties.forEach((p) => {
-      if (p.access === false) return;
-      const isSharedProp = Boolean(p.isShared || p.is_shared || (currentUserId && p.userId && p.userId !== currentUserId));
-      if (isSharedProp) {
-        shared++;
-      } else {
-        mine++;
-      }
-    });
-    return { propertiesCountMine: mine, propertiesCountShared: shared };
-  }, [properties, currentUserId]);
+  const propertiesCountMine = propertiesScopeCounts.mine ?? (
+    properties.filter(p => !Boolean(p.isShared || p.is_shared || (currentUserId && p.userId && p.userId !== currentUserId))).length
+  );
+  const propertiesCountShared = propertiesScopeCounts.shared ?? (
+    properties.filter(p => Boolean(p.isShared || p.is_shared || (currentUserId && p.userId && p.userId !== currentUserId))).length
+  );
 
-  // Filtrado y ordenamiento altamente optimizado con useMemo
+  // Ordenamiento de las propiedades ya cargadas en memoria
   const tabSortedProperties = useMemo(() => {
-    const q = deferredTabSearchQuery.trim().toLowerCase();
-    let list = properties;
-
-    // 1. Filtrar por ámbito (Mis propiedades / Compartidas)
-    if (propertyFilterScope === 'compartidas') {
-      list = list.filter((p) => {
-        const isSharedProp = Boolean(p.isShared || p.is_shared || (currentUserId && p.userId && p.userId !== currentUserId));
-        return isSharedProp;
-      });
-    } else {
-      // 'propias' por defecto
-      list = list.filter((p) => {
-        const isSharedProp = Boolean(p.isShared || p.is_shared || (currentUserId && p.userId && p.userId !== currentUserId));
-        return !isSharedProp;
-      });
+    let list = [...properties];
+    if (tabSortBy === 'nombre-asc') {
+      return list.sort((a, b) => (a.name || a.title || '').localeCompare(b.name || b.title || ''));
     }
-
-    // 2. Filtrar por texto de búsqueda
-    if (q) {
-      list = list.filter((prop) => {
-        const name = prop.name || prop.title || '';
-        const addr = prop.address || prop.location || '';
-        return name.toLowerCase().includes(q) || addr.toLowerCase().includes(q);
-      });
+    if (tabSortBy === 'nombre-desc') {
+      return list.sort((a, b) => (b.name || b.title || '').localeCompare(a.name || a.title || ''));
     }
+    return list;
+  }, [properties, tabSortBy]);
 
-    // 3. Ordenamiento
-    return [...list].sort((a, b) => {
-      if (tabSortBy === 'nombre-asc') {
-        return (a.name || a.title || '').localeCompare(b.name || b.title || '');
-      }
-      if (tabSortBy === 'nombre-desc') {
-        return (b.name || b.title || '').localeCompare(a.name || a.title || '');
-      }
-      return (b.id || 0) - (a.id || 0);
-    });
-  }, [properties, deferredTabSearchQuery, tabSortBy, propertyFilterScope, currentUserId]);
-
-  // Lista de propiedades visibles progresivamente (Lotes rápidos y fluidos en memoria)
-  const tabPaginatedProperties = useMemo(() => {
-    return tabSortedProperties.slice(0, tabVisibleCount);
-  }, [tabSortedProperties, tabVisibleCount]);
-
-  const hasMoreTabProperties = tabVisibleCount < tabSortedProperties.length;
+  const hasMoreTabProperties = Boolean(propertiesPagination.hasMore);
+  const totalCountForScope = propertiesPagination.total !== undefined ? propertiesPagination.total : properties.length;
+  const remainingPropertiesCount = Math.max(0, totalCountForScope - properties.length);
 
   const handleLoadMoreTabProperties = useCallback(() => {
-    setTabVisibleCount((prev) => prev + TAB_BATCH_SIZE);
-  }, []);
+    if (isLoadingMoreProperties || isLoadingProperties || !propertiesPagination.hasMore) return;
+    loadProperties({
+      page: (propertiesPagination.page || 1) + 1,
+      scope: propertyFilterScopeRef.current,
+      search: tabSearchQueryRef.current,
+    });
+  }, [isLoadingMoreProperties, isLoadingProperties, propertiesPagination.hasMore, propertiesPagination.page, loadProperties]);
 
   // Observer para carga infinita automática al acercarse al final del scroll
   useEffect(() => {
     const sentinel = tabSentinelRef.current;
-    if (!sentinel || !hasMoreTabProperties) return;
+    if (!sentinel || !hasMoreTabProperties || isLoadingMoreProperties || isLoadingProperties) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -907,14 +1041,14 @@ export default function App() {
       },
       {
         root: null,
-        rootMargin: '300px',
+        rootMargin: '250px',
         threshold: 0.05,
       }
     );
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [handleLoadMoreTabProperties, hasMoreTabProperties]);
+  }, [handleLoadMoreTabProperties, hasMoreTabProperties, isLoadingMoreProperties, isLoadingProperties]);
 
   // Estado de grabación en vivo simulada y fases de dictado ('idle' | 'recording' | 'processing' | 'review')
   const [isRecording, setIsRecording] = useState(false);
@@ -1095,6 +1229,10 @@ export default function App() {
 
   // Estados para Detección de Ítems por Fotos con IA en ambiente
   const [photoItemPhase, setPhotoItemPhase] = useState('upload'); // 'upload' | 'analyzing' | 'review'
+  // Acceso al análisis de fotos con IA según el plan: { allowed, mode, used, limit, message } | null (aún sin consultar)
+  const [aiPhotoAccess, setAiPhotoAccess] = useState(null);
+  // true mientras se consulta el plan al entrar a la propiedad (evita mostrar la opción habilitada por un instante)
+  const [aiPhotoChecking, setAiPhotoChecking] = useState(false);
   const [photoItemFiles, setPhotoItemFiles] = useState([]);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [cameraContext, setCameraContext] = useState('items'); // 'items' | 'property' | 'room'
@@ -1505,7 +1643,19 @@ export default function App() {
 
   // Handlers para la página / vista de detalle de propiedad
   const handleOpenPropertyDetail = useCallback(async (prop) => {
+    // Propiedad sin acceso por el plan actual (access=false): no se puede ingresar
+    if (prop?.access === false) {
+      toast.error('Esta propiedad no está disponible en tu plan actual. Mejorá tu plan para volver a acceder.');
+      return;
+    }
     setIsLoadingPropertyDetail(true);
+    // Consultar de antemano el acceso a fotos con IA según el plan: así el selector ya abre con el estado correcto
+    setAiPhotoAccess(null);
+    setAiPhotoChecking(true);
+    photoService.getAiAccess(prop?.id)
+      .then(res => { if (res?.success && res.access) setAiPhotoAccess(res.access); })
+      .catch(() => {})
+      .finally(() => setAiPhotoChecking(false));
     const propWithInv = {
       ...prop,
       inventory: prop.inventory || getPropertyInventory(prop),
@@ -1809,6 +1959,12 @@ export default function App() {
       await propertyService.deleteProperty(propId);
       setProperties(prev => prev.filter(p => p.id !== propId));
       setRecentProperties(prev => prev.filter(p => p.id !== propId));
+      setPropertiesPagination(prev => ({ ...prev, total: Math.max(0, (prev.total || 1) - 1) }));
+      setPropertiesScopeCounts(prev => ({
+        ...prev,
+        all: Math.max(0, (prev.all || 1) - 1),
+        mine: Math.max(0, (prev.mine || 1) - 1),
+      }));
       setIsDeletePropertyModalOpen(false);
       setIsPropertyOptionsMenuOpen(false);
       setSelectedPropertyDetail(null);
@@ -2399,6 +2555,12 @@ export default function App() {
   const handleOpenAddItemModal = () => {
     itemAudioRecorder.cancelRecording();
     setIsAddItemModalOpen(true);
+    // Refrescar en segundo plano el plan (el estado ya se consultó al entrar a la propiedad; no se oculta mientras tanto)
+    if (!aiPhotoAccess) setAiPhotoChecking(true);
+    photoService.getAiAccess(selectedPropertyDetail?.id)
+      .then(res => { if (res?.success && res.access) setAiPhotoAccess(res.access); })
+      .catch(() => {})
+      .finally(() => setAiPhotoChecking(false));
     setItemAddMethod('select');
     // reset voz
     setVoiceItemPhase('idle');
@@ -2802,6 +2964,12 @@ export default function App() {
           item_type: itemType
         });
 
+        // El plan no permite el análisis (Free) o ya se agotó el cupo (Starter): mostrar el motivo real
+        if (!res.success && (res.status === 403 || String(res.code || '').startsWith('AI_PHOTO'))) {
+          const planErr = new Error(res.message || 'Tu plan no incluye el análisis de fotos con IA.');
+          planErr.planBlocked = true;
+          throw planErr;
+        }
         if (res.success && Array.isArray(res.data?.items)) {
           return res.data.items.map((it, itemIdx) => ({
             id: `photo-item-${Date.now()}-${photoIdx}-${itemIdx}`,
@@ -2831,7 +2999,12 @@ export default function App() {
       }
     } catch (err) {
       console.error('Error al analizar fotos con IA:', err);
-      toast.error('Error al procesar las fotos con IA: ' + (err.message || err));
+      if (err.planBlocked) {
+        toast.error(err.message);
+        if (aiPhotoAccess) setAiPhotoAccess({ ...aiPhotoAccess, allowed: false, message: err.message });
+      } else {
+        toast.error('Error al procesar las fotos con IA: ' + (err.message || err));
+      }
       setPhotoItemPhase('upload');
     }
   };
@@ -3076,7 +3249,32 @@ export default function App() {
     }
   };
 
-  const handleOpenFloorPlanDesigner = (prop) => {
+  // Plano: exclusivo de Pro. Se informa en el mismo chequeo de acceso que Aitems Foto.
+  const floorPlanLocked = aiPhotoAccess?.floorPlan?.allowed === false;
+  const floorPlanChecking = !aiPhotoAccess && aiPhotoChecking;
+  const floorPlanLockMessage = aiPhotoAccess?.floorPlan?.message || 'El plano de la propiedad está disponible solo en el Plan Pro.';
+
+  const handleOpenFloorPlanDesigner = async (prop) => {
+    if (floorPlanChecking) return;
+    if (floorPlanLocked) {
+      toast.error(floorPlanLockMessage);
+      return;
+    }
+    // Si todavía no se conoce el plan, verificar antes de abrir el editor
+    if (!aiPhotoAccess) {
+      try {
+        const res = await photoService.getAiAccess((prop || selectedPropertyDetail)?.id);
+        if (res?.success && res.access) {
+          setAiPhotoAccess(res.access);
+          if (res.access.floorPlan?.allowed === false) {
+            toast.error(res.access.floorPlan.message || floorPlanLockMessage);
+            return;
+          }
+        }
+      } catch (err) {
+        // Si falla la verificación, el backend igualmente rechaza el guardado en planes sin acceso
+      }
+    }
     if (prop) setSelectedPropertyDetail(prop);
     setIsFloorPlanEditorOpen(true);
   };
@@ -3152,40 +3350,25 @@ export default function App() {
         };
         setProperties(prev => [created, ...prev]);
         setRecentProperties(prev => [created, ...prev.filter(p => p.id !== created.id)].slice(0, 3));
+        setPropertiesPagination(prev => ({ ...prev, total: (prev.total || 0) + 1 }));
+        setPropertiesScopeCounts(prev => ({
+          ...prev,
+          all: (prev.all || 0) + 1,
+          mine: (prev.mine || 0) + 1,
+        }));
       } else {
-        const newProperty = {
-          id: Date.now(),
-          name: propertyPayload.name,
-          title: propertyPayload.name,
-          address: propertyPayload.address,
-          location: propertyPayload.location,
-          image: propertyPayload.image_url || null,
-          rooms: propertyPayload.rooms || [],
-          ambientes: (propertyPayload.rooms || []).length,
-          typeSeguro: propertyPayload.typeSeguro || null,
-          items: 0,
-          inventory: {},
-        };
-        setProperties(prev => [newProperty, ...prev]);
-        setRecentProperties(prev => [newProperty, ...prev].slice(0, 3));
+        // No crear nada localmente: la propiedad NO existe en el backend
+        if (res?.code === 'PLAN_PROPERTIES_LIMIT_REACHED') {
+          toast.error(res.message || `Alcanzaste el límite de ${res.limit} propiedades de tu plan. Mejorá tu plan para crear más.`);
+        } else {
+          toast.error(res?.message || res?.error || 'No se pudo crear la propiedad');
+        }
+        return false;
       }
     } catch (err) {
-      console.warn('Error al persistir propiedad en backend, guardando local:', err);
-      const newProperty = {
-        id: Date.now(),
-        name: propertyPayload.name,
-        title: propertyPayload.name,
-        address: propertyPayload.address,
-        location: propertyPayload.location,
-        image: propertyPayload.image_url || null,
-        rooms: propertyPayload.rooms || [],
-        ambientes: (propertyPayload.rooms || []).length,
-        typeSeguro: propertyPayload.typeSeguro || null,
-        items: 0,
-        inventory: {},
-      };
-      setProperties(prev => [newProperty, ...prev]);
-      setRecentProperties(prev => [newProperty, ...prev].slice(0, 3));
+      console.warn('Error al crear propiedad en backend:', err);
+      toast.error('No se pudo crear la propiedad. Revisá tu conexión e intentá de nuevo.');
+      return false;
     }
 
     toast.success(`Propiedad "${propertyPayload.name}" creada exitosamente`);
@@ -3194,12 +3377,14 @@ export default function App() {
     setFormAddress('');
     setFormImage(null);
     setIsModalOpen(false);
+    return true;
   };
 
   // Abrir modal de acción rápida (Dictado / Fotos / Planos)
   const openQuickAction = (type) => {
     setQuickActionType(type);
     setActionStep(1);
+    loadSelectableProperties();
     setSelectedProperty(null);
     setSelectedRoom(null);
     setIsRecording(false);
@@ -3583,7 +3768,7 @@ export default function App() {
               <div>
                 <h2 style={styles.sectionTitle}>Propiedades Recientes</h2>
               </div>
-              {properties.length > 0 && (
+              {(properties.length > 0 || (propertiesPagination && propertiesPagination.total > 0)) && (
                 <button 
                   style={styles.verTodasBtn}
                   onClick={() => setActiveTab('propiedades')}
@@ -3899,7 +4084,7 @@ export default function App() {
                 </div>
               ))}
             </div>
-          ) : properties.length > 0 ? (
+          ) : (properties.length > 0 || (propertiesPagination && propertiesPagination.total > 0) || propertyFilterScope === 'compartidas' || tabSearchQuery) ? (
             <>
               {/* Barra de Filtro y Orden */}
               <div className="app-tab-controls-container" style={styles.tabControlsContainer}>
@@ -3911,10 +4096,7 @@ export default function App() {
                       ...styles.propertiesScopeTab,
                       ...(propertyFilterScope === 'propias' ? styles.propertiesScopeTabActive : styles.propertiesScopeTabInactive),
                     }}
-                    onClick={() => {
-                      setPropertyFilterScope('propias');
-                      setTabVisibleCount(TAB_INITIAL_VISIBLE);
-                    }}
+                    onClick={() => handleScopeChange('propias')}
                   >
                     <span>Mis propiedades</span>
                     <span style={propertyFilterScope === 'propias' ? styles.scopeCountBadgeActive : styles.scopeCountBadgeInactive}>
@@ -3928,10 +4110,7 @@ export default function App() {
                       ...styles.propertiesScopeTab,
                       ...(propertyFilterScope === 'compartidas' ? styles.propertiesScopeTabActive : styles.propertiesScopeTabInactive),
                     }}
-                    onClick={() => {
-                      setPropertyFilterScope('compartidas');
-                      setTabVisibleCount(TAB_INITIAL_VISIBLE);
-                    }}
+                    onClick={() => handleScopeChange('compartidas')}
                   >
                     <Users size={13} style={{ marginRight: '2px' }} />
                     <span>Compartidas</span>
@@ -3942,27 +4121,21 @@ export default function App() {
                 </div>
 
                 <div style={styles.tabFilterBar}>
-                  {/* Búsqueda */}
+                  {/* Búsqueda con debounce en servidor */}
                   <div style={styles.tabSearchBar}>
                     <Search size={16} color="#94a3b8" style={{ flexShrink: 0 }} />
                     <input 
                       type="text"
                       placeholder="Buscar por nombre o dirección..."
                       value={tabSearchQuery}
-                      onChange={(e) => {
-                        setTabSearchQuery(e.target.value);
-                        setTabVisibleCount(TAB_INITIAL_VISIBLE);
-                      }}
+                      onChange={(e) => handleSearchChange(e.target.value)}
                       style={styles.tabSearchInput}
                     />
                     {tabSearchQuery && (
                       <button 
                         type="button" 
                         style={styles.searchClearBtn}
-                        onClick={() => {
-                          setTabSearchQuery('');
-                          setTabVisibleCount(TAB_INITIAL_VISIBLE);
-                        }}
+                        onClick={handleClearSearch}
                         aria-label="Limpiar búsqueda"
                       >
                         <X size={13} color="#64748b" />
@@ -3970,15 +4143,12 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Ordenamiento (Sort: solo más recientes, A-Z y Z-A) */}
+                  {/* Ordenamiento (Sort: más recientes, A-Z y Z-A) */}
                   <div style={styles.tabSortSelectWrapper}>
                     <ArrowUpDown size={14} color="#64748b" style={{ flexShrink: 0 }} />
                     <select 
                       value={tabSortBy}
-                      onChange={(e) => {
-                        setTabSortBy(e.target.value);
-                        setTabVisibleCount(TAB_INITIAL_VISIBLE);
-                      }}
+                      onChange={(e) => setTabSortBy(e.target.value)}
                       style={styles.tabSortSelect}
                       aria-label="Ordenar propiedades"
                     >
@@ -3992,23 +4162,23 @@ export default function App() {
                 {/* Metadatos: Conteo y Progreso de visualización */}
                 <div style={styles.tabListMetaRow}>
                   <span style={styles.tabListCountText}>
-                    {tabSortedProperties.length} {tabSortedProperties.length === 1 ? 'propiedad encontrada' : 'propiedades encontradas'}
+                    {totalCountForScope} {totalCountForScope === 1 ? 'propiedad encontrada' : 'propiedades encontradas'}
                     {tabSearchQuery && ` para "${tabSearchQuery}"`}
                   </span>
-                  {tabSortedProperties.length > 0 && (
+                  {totalCountForScope > 0 && (
                     <span style={styles.tabListPageBadge}>
-                      {tabPaginatedProperties.length < tabSortedProperties.length
-                        ? `Mostrando ${tabPaginatedProperties.length} de ${tabSortedProperties.length}`
-                        : `Total: ${tabSortedProperties.length}`}
+                      {tabSortedProperties.length < totalCountForScope
+                        ? `Mostrando ${tabSortedProperties.length} de ${totalCountForScope}`
+                        : `Total: ${totalCountForScope}`}
                     </span>
                   )}
                 </div>
               </div>
 
-              {/* Listado de propiedades renderizadas por lotes optimizados */}
-              {tabPaginatedProperties.length > 0 ? (
+              {/* Listado de propiedades renderizadas progresivamente con batch inteligente */}
+              {tabSortedProperties.length > 0 ? (
                 <div className="app-tab-content-list" style={styles.tabContentList}>
-                  {tabPaginatedProperties.map((item) => (
+                  {tabSortedProperties.map((item) => (
                     <PropertyCardItem 
                       key={item.id}
                       item={item}
@@ -4033,10 +4203,7 @@ export default function App() {
                     <button 
                       type="button" 
                       style={styles.clearSearchFilterBtn}
-                      onClick={() => {
-                        setPropertyFilterScope('propias');
-                        setTabVisibleCount(TAB_INITIAL_VISIBLE);
-                      }}
+                      onClick={() => handleScopeChange('propias')}
                     >
                       Ver mis propiedades
                     </button>
@@ -4051,11 +4218,7 @@ export default function App() {
                     <button 
                       type="button" 
                       style={styles.clearSearchFilterBtn}
-                      onClick={() => {
-                        setTabSearchQuery('');
-                        setPropertyFilterScope('todas');
-                        setTabVisibleCount(TAB_INITIAL_VISIBLE);
-                      }}
+                      onClick={handleClearSearch}
                     >
                       {tabSearchQuery ? 'Limpiar búsqueda' : 'Ver todas las propiedades'}
                     </button>
@@ -4074,11 +4237,24 @@ export default function App() {
                       {/* Botón interactivo de carga asistida instantánea */}
                       <button 
                         type="button"
-                        style={styles.loadMorePillBtn}
+                        style={{
+                          ...styles.loadMorePillBtn,
+                          opacity: isLoadingMoreProperties ? 0.75 : 1,
+                        }}
+                        disabled={isLoadingMoreProperties}
                         onClick={handleLoadMoreTabProperties}
                       >
-                        <span>Cargar más ({tabSortedProperties.length - tabPaginatedProperties.length} restantes)</span>
-                        <ChevronDown size={16} color="#4f46e5" />
+                        {isLoadingMoreProperties ? (
+                          <>
+                            <Loader2 size={16} color="#4f46e5" style={{ animation: 'spin 1s linear infinite' }} />
+                            <span>Cargando más propiedades...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>Cargar más ({remainingPropertiesCount} restantes)</span>
+                            <ChevronDown size={16} color="#4f46e5" />
+                          </>
+                        )}
                       </button>
 
                       {/* Mini barra de progreso visual */}
@@ -4086,16 +4262,16 @@ export default function App() {
                         <div 
                           style={{
                             ...styles.progressTrackerFill,
-                            width: `${Math.min(100, Math.round((tabPaginatedProperties.length / tabSortedProperties.length) * 100))}%`
+                            width: `${Math.min(100, Math.round((tabSortedProperties.length / (totalCountForScope || 1)) * 100))}%`
                           }} 
                         />
                       </div>
                     </>
                   ) : (
-                    tabSortedProperties.length > TAB_INITIAL_VISIBLE && (
+                    totalCountForScope > 12 && (
                       <div style={styles.tabAllLoadedBanner}>
                         <CheckCircle2 size={16} color="#10b981" />
-                        <span>Has visto todas las propiedades ({tabSortedProperties.length})</span>
+                        <span>Has visto todas las propiedades ({totalCountForScope})</span>
                       </div>
                     )
                   )}
@@ -4143,7 +4319,7 @@ export default function App() {
         <AjustesScreen
           currentUser={currentUser}
           agency={agency}
-          propertiesCount={properties.length}
+          propertiesCount={propertiesScopeCounts.all || propertiesPagination.total || properties.length}
           agentsCount={agents.length}
           onUpdateUser={(updatedUserData) => {
             setCurrentUser(prev => ({
@@ -5430,22 +5606,48 @@ export default function App() {
                             <ChevronRight size={18} color="#94a3b8" />
                           </div>
 
-                          {/* Opción 2: Analizar fotos con IA */}
+                          {/* Opción 2: Analizar fotos con IA (Free: PRO/bloqueado · Starter: 2 propiedades · Pro: ilimitado) */}
                           <div 
-                            style={styles.methodChoiceCard}
+                            style={{
+                              ...styles.methodChoiceCard,
+                              ...(aiPhotoAccess && aiPhotoAccess.allowed === false ? { opacity: 0.7, cursor: 'not-allowed' } : {}),
+                              ...(!aiPhotoAccess && aiPhotoChecking ? { opacity: 0.6, cursor: 'default' } : {}),
+                            }}
                             onClick={() => {
+                              if (!aiPhotoAccess && aiPhotoChecking) return;
+                              if (aiPhotoAccess && aiPhotoAccess.allowed === false) {
+                                toast.error(aiPhotoAccess.message || 'El análisis de fotos con IA requiere un plan superior.');
+                                return;
+                              }
                               setItemAddMethod('photo');
                               setPhotoItemPhase('upload');
                               setPhotoItemFiles([]);
                             }}
                           >
                             <div style={styles.methodIconCirclePhoto}>
-                              <Camera size={22} color="#0284c7" strokeWidth={2.2} />
+                              {aiPhotoAccess && aiPhotoAccess.allowed === false
+                                ? <Lock size={22} color="#64748b" strokeWidth={2.2} />
+                                : <Camera size={22} color="#0284c7" strokeWidth={2.2} />}
                             </div>
                             <div style={styles.methodCardInfo}>
-                              <h4 style={styles.methodCardTitle}>Analizar fotos con IA</h4>
+                              <h4 style={styles.methodCardTitle}>
+                                Analizar fotos con IA
+                                {!aiPhotoAccess && aiPhotoChecking && (
+                                  <span style={{ marginLeft: 8, padding: '2px 8px', borderRadius: 8, background: '#e2e8f0', color: '#64748b', fontSize: 10, fontWeight: 800, letterSpacing: '0.4px', verticalAlign: 'middle' }}>VERIFICANDO</span>
+                                )}
+                                {aiPhotoAccess && aiPhotoAccess.allowed === false && (
+                                  <span style={{ marginLeft: 8, padding: '2px 8px', borderRadius: 8, background: '#0f172a', color: '#fff', fontSize: 10, fontWeight: 800, letterSpacing: '0.4px', verticalAlign: 'middle' }}>PRO</span>
+                                )}
+                                {aiPhotoAccess && aiPhotoAccess.allowed && aiPhotoAccess.mode === 'limited' && (
+                                  <span style={{ marginLeft: 8, padding: '2px 8px', borderRadius: 8, background: '#d97706', color: '#fff', fontSize: 10, fontWeight: 800, letterSpacing: '0.4px', verticalAlign: 'middle' }}>
+                                    PRUEBA {Math.min(aiPhotoAccess.used ?? 0, aiPhotoAccess.limit ?? 2)}/{aiPhotoAccess.limit ?? 2}
+                                  </span>
+                                )}
+                              </h4>
                               <p style={styles.methodCardSub}>
-                                Subí o tomá fotos del ambiente y la IA identificará automáticamente los elementos y su estado.
+                                {aiPhotoAccess && aiPhotoAccess.allowed === false
+                                  ? aiPhotoAccess.message
+                                  : 'Subí o tomá fotos del ambiente y la IA identificará automáticamente los elementos y su estado.'}
                               </p>
                             </div>
                             <ChevronRight size={18} color="#94a3b8" />
@@ -7040,15 +7242,21 @@ export default function App() {
                       })()
                     ) : (
                       <div
-                        style={{ ...styles.detailEmptyPlanPrompt, cursor: 'pointer' }}
+                        style={{ ...styles.detailEmptyPlanPrompt, cursor: floorPlanChecking ? 'default' : 'pointer' }}
                         onClick={() => handleOpenFloorPlanDesigner(selectedPropertyDetail)}
                       >
                         <div style={styles.emptyPlanIconCircle}>
-                          <Layers size={26} color="#4f46e5" strokeWidth={2} />
+                          {floorPlanLocked
+                            ? <Lock size={26} color="#64748b" strokeWidth={2} />
+                            : <Layers size={26} color="#4f46e5" strokeWidth={2} />}
                         </div>
-                        <span style={styles.detailEmptyPlanTitle}>Esta propiedad no tiene plano</span>
+                        <span style={styles.detailEmptyPlanTitle}>
+                          {floorPlanLocked ? 'Disponible solo en Plan Pro' : 'Esta propiedad no tiene plano'}
+                        </span>
                         <span style={styles.detailEmptyPlanSub}>
-                          Aún no se ha diseñado el plano arquitectónico para esta propiedad
+                          {floorPlanLocked
+                            ? 'El diseño de planos está disponible solo en el Plan Pro'
+                            : 'Aún no se ha diseñado el plano arquitectónico para esta propiedad'}
                         </span>
                       </div>
                     )}
@@ -7058,15 +7266,27 @@ export default function App() {
                   <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'center', width: '100%' }}>
                     <button
                       type="button"
-                      style={styles.detailPlanDesignerBtn}
+                      style={{
+                        ...styles.detailPlanDesignerBtn,
+                        ...(floorPlanLocked ? { background: '#475569', boxShadow: 'none' } : {}),
+                        ...(floorPlanChecking ? { opacity: 0.6 } : {}),
+                      }}
                       onClick={() => handleOpenFloorPlanDesigner(selectedPropertyDetail)}
                     >
-                      {hasPlan ? (
+                      {floorPlanLocked ? (
+                        <Lock size={16} color="#ffffff" strokeWidth={2.4} />
+                      ) : hasPlan ? (
                         <Layers size={16} color="#ffffff" strokeWidth={2.2} />
                       ) : (
                         <Plus size={16} color="#ffffff" strokeWidth={2.4} />
                       )}
                       <span>{hasPlan ? 'Editar plano' : 'Diseñar plano'}</span>
+                      {floorPlanLocked && (
+                        <span style={{ marginLeft: 4, padding: '2px 8px', borderRadius: 8, background: '#0f172a', color: '#fff', fontSize: 10, fontWeight: 800, letterSpacing: '0.4px' }}>PRO</span>
+                      )}
+                      {floorPlanChecking && (
+                        <span style={{ marginLeft: 4, padding: '2px 8px', borderRadius: 8, background: '#e2e8f0', color: '#64748b', fontSize: 10, fontWeight: 800, letterSpacing: '0.4px' }}>VERIFICANDO</span>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -7904,7 +8124,7 @@ export default function App() {
               {/* ---- PASO 1: SELECCIONAR PROPIEDAD ---- */}
             {actionStep === 1 && (
               <div style={styles.stepContainer}>
-                {properties.length > 0 ? (
+                {selectorProperties.length > 0 ? (
                   <>
                     {/* Barra de Búsqueda instantánea para filtrar entre 100+ propiedades */}
                     <div style={styles.searchBarContainer}>
@@ -9552,9 +9772,9 @@ const styles = {
   },
   backToTopFab: {
     position: 'fixed',
-    bottom: '88px',
+    bottom: 'calc(96px + env(safe-area-inset-bottom, 18px))',
     right: '20px',
-    zIndex: 90,
+    zIndex: 100,
     display: 'flex',
     alignItems: 'center',
     gap: '6px',
@@ -9563,8 +9783,10 @@ const styles = {
     backgroundColor: '#0f172a',
     color: '#ffffff',
     border: 'none',
-    boxShadow: '0 6px 20px rgba(15, 23, 42, 0.25)',
+    boxShadow: '0 4px 18px rgba(15, 23, 42, 0.28)',
     cursor: 'pointer',
+    WebkitTapHighlightColor: 'transparent',
+    transition: 'transform 0.15s ease, opacity 0.15s ease',
   },
   backToTopFabText: {
     fontSize: '12px',

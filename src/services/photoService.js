@@ -10,6 +10,15 @@ export const photoService = {
   },
 
   /**
+   * Consultar si el plan permite analizar fotos con IA (Free: no · Starter: 2 propiedades · Pro: ilimitado)
+   * @param {string} [propertyId]
+   */
+  async getAiAccess(propertyId) {
+    const qs = propertyId ? `?property_id=${encodeURIComponent(propertyId)}` : '';
+    return await api.get(`/api/photos/ai-access${qs}`);
+  },
+
+  /**
    * Mover fotos a otro ambiente / categoría
    * @param {Object} payload - { ids: string[], room: string, category_id?: string, property_id?: string }
    */

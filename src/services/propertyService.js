@@ -10,10 +10,25 @@ export const propertyService = {
   },
 
   /**
-   * Obtiene la lista completa de propiedades accesibles para el usuario
+   * Obtiene la lista de propiedades con soporte de paginación inteligente, búsqueda y filtros
    */
-  async getProperties() {
-    return await api.get('/api/properties');
+  async getProperties(params = {}) {
+    const cleanParams = {};
+    Object.keys(params).forEach((k) => {
+      if (params[k] !== undefined && params[k] !== null && params[k] !== '') {
+        cleanParams[k] = params[k];
+      }
+    });
+    const query = new URLSearchParams(cleanParams).toString();
+    return await api.get(`/api/properties${query ? `?${query}` : ''}`);
+  },
+
+  /**
+   * Obtiene todas las propiedades utilizables (sin bloqueadas ni borradas) en una respuesta liviana,
+   * pensada para selectores y modales de acciones rápidas
+   */
+  async getAllQuick() {
+    return await api.get('/api/properties/all-quick');
   },
 
   /**
