@@ -40,8 +40,8 @@ const FAQ_ITEMS = [
     answer: "El editor te permite dibujar paredes, añadir puertas, ventanas, asignar ambientes y exportarlo para que tus clientes vean un plano interactivo al presentar el informe."
   },
   {
-    question: "¿Cómo cambio o gestiono mi plan?",
-    answer: "Puedes gestionar tu suscripción en cualquier momento desde el 'Panel de Inmobiliaria', donde encontrarás las opciones para actualizar o administrar tus licencias."
+    question: "¿Cómo se asignan los cupos de mi inmobiliaria?",
+    answer: "Los cupos de propiedades y miembros autorizados son configurados a nivel institucional para tu organización inmobiliaria."
   }
 ];
 
@@ -513,19 +513,24 @@ export default function AjustesScreen({
       >
         <div style={styles.termsContainer}>
           <div style={styles.termsCard}>
-            <h4 style={styles.termsHeading}>1. Uso de la plataforma</h4>
+            <h4 style={styles.termsHeading}>1. Aceptación y Servicio</h4>
             <p style={styles.termsParagraph}>
-              Aitems es una herramienta profesional destinada al relevamiento inmobiliario, generación de inventarios digitales y planos arquitectónicos interactivos.
+              Al utilizar Aitems aceptas estos términos. Aitems es una plataforma de gestión de inventarios inmobiliarios que asiste en el registro y control de propiedades, ambientes e ítems.
             </p>
 
-            <h4 style={styles.termsHeading}>2. Privacidad y Seguridad</h4>
+            <h4 style={styles.termsHeading}>2. Propiedad de los Datos</h4>
             <p style={styles.termsParagraph}>
-              Tus fotografías, audios e información cargada están protegidos con cifrado y se almacenan de manera confidencial conforme a los estándares de la industria.
+              Tus datos te pertenecen. Toda la información, fotografías e inventarios registrados son de tu propiedad exclusiva. Aitems no utiliza tus datos ni tus contenidos para fines ajenos al servicio.
             </p>
 
-            <h4 style={styles.termsHeading}>3. Propiedad de los Contenidos</h4>
+            <h4 style={styles.termsHeading}>3. Responsabilidad del Usuario</h4>
             <p style={styles.termsParagraph}>
-              Los inventarios, planos y reportes generados pertenecen exclusivamente a tu inmobiliaria o usuario y son exportables en formato PDF de alta resolución.
+              El usuario es responsable de la exactitud de sus contenidos y la custodia de su cuenta. La eliminación de datos o inventarios es permanente e irreversible.
+            </p>
+
+            <h4 style={styles.termsHeading}>4. Legislación Aplicable</h4>
+            <p style={{ ...styles.termsParagraph, marginBottom: 0 }}>
+              Los presentes términos y el uso de la plataforma se rigen conforme a las leyes de la República Oriental del Uruguay.
             </p>
           </div>
 
@@ -533,6 +538,10 @@ export default function AjustesScreen({
             href="https://www.aitems.uy/terminos-condiciones"
             target="_blank"
             rel="noopener noreferrer"
+            onClick={(e) => {
+              e.preventDefault();
+              window.open('https://www.aitems.uy/terminos-condiciones', '_blank');
+            }}
             style={styles.termsLinkBtn}
           >
             <span>Ver términos completos en el sitio web</span>

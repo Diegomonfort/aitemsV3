@@ -1,18 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from '../context/ToastContext';
-import { 
-  Building2, 
-  MapPin, 
-  Globe, 
-  Pencil, 
-  CheckCircle2, 
-  Users, 
-  UserPlus, 
-  Mail, 
-  Trash2, 
-  RotateCw, 
-  X, 
-  Check, 
+import {
+  Building2,
+  MapPin,
+  Globe,
+  Pencil,
+  CheckCircle2,
+  Users,
+  UserPlus,
+  Mail,
+  Trash2,
+  RotateCw,
+  X,
+  Check,
   ExternalLink,
   Upload,
   Camera,
@@ -141,7 +141,7 @@ export default function OwnerDashboard({
     setLogoError('');
     try {
       const locationText = [formCity, formCountry].filter(Boolean).join(', ');
-      const formattedWebsite = formAgencyWebsite.trim() 
+      const formattedWebsite = formAgencyWebsite.trim()
         ? `https://${formAgencyWebsite.trim().replace(/^https?:\/\//i, '').replace(/\/$/, '')}`
         : '';
 
@@ -263,9 +263,9 @@ export default function OwnerDashboard({
           ========================================================================= */}
       <div style={styles.profileHero}>
         <div style={styles.avatarCircle}>
-          <img 
-            src={agency?.logo || logoDefault} 
-            alt={agency?.name || 'Inmobiliaria'} 
+          <img
+            src={agency?.logo || logoDefault}
+            alt={agency?.name || 'Inmobiliaria'}
             style={styles.avatarImg}
             onError={(e) => {
               if (e.target.src !== logoDefault) {
@@ -288,9 +288,9 @@ export default function OwnerDashboard({
             <span style={styles.metaDot}>•</span>
           )}
           {agency?.website && (
-            <a 
-              href={agency.website.startsWith('http') ? agency.website : `https://${agency.website}`} 
-              target="_blank" 
+            <a
+              href={agency.website.startsWith('http') ? agency.website : `https://${agency.website}`}
+              target="_blank"
               rel="noopener noreferrer"
               style={styles.websiteLink}
             >
@@ -301,8 +301,8 @@ export default function OwnerDashboard({
           )}
         </div>
 
-        <button 
-          type="button" 
+        <button
+          type="button"
           style={styles.editProfileBtn}
           onClick={handleOpenEdit}
         >
@@ -331,7 +331,7 @@ export default function OwnerDashboard({
                 style={styles.planManageBtn}
                 onClick={() => setIsManagePlanOpen(true)}
               >
-                <span>Gestionar</span>
+                <span>Detalles</span>
               </button>
             </div>
           </div>
@@ -365,13 +365,12 @@ export default function OwnerDashboard({
           <h3 style={styles.sectionHeading}>
             Inspectores y Colegas <span>({safeAgents.length})</span>
           </h3>
-          <button 
-            type="button" 
+          <button
+            type="button"
             style={styles.inviteBtn}
             onClick={() => {
               if (plan?.name === 'Plan Free' || (plan?.agentsLimit && plan.agentsLimit <= 1)) {
-                toast.info('El Plan Free no permite agregar inspectores. Podés ampliar tu plan a Starter o Pro.');
-                setIsManagePlanOpen(true);
+                toast.info('Tu inmobiliaria ha alcanzado el límite de inspectores disponibles.');
                 return;
               }
               setIsInviteAgentOpen(true);
@@ -388,8 +387,8 @@ export default function OwnerDashboard({
             const isPending = agent.status === 'invited';
 
             return (
-              <div 
-                key={agent.id} 
+              <div
+                key={agent.id}
                 style={{
                   ...styles.agentRow,
                   borderBottom: index === agents.length - 1 ? 'none' : '1px solid #f1f5f9'
@@ -422,8 +421,8 @@ export default function OwnerDashboard({
                 {/* Acciones */}
                 {isPending && (
                   <div style={styles.agentRowActions}>
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       style={styles.resendActionBtn}
                       onClick={() => {
                         onResendInvite(agent.id);
@@ -456,184 +455,184 @@ export default function OwnerDashboard({
           title="Editar Inmobiliaria"
           size="full"
         >
-              <form onSubmit={handleSaveAgency} style={styles.formStack}>
-                
-                {/* 1. Nombre de la Inmobiliaria */}
-                <div style={styles.inputStack}>
-                  <label style={styles.label}>Nombre de la Inmobiliaria *</label>
-                  <input 
-                    type="text" 
-                    value={formAgencyName}
-                    onChange={(e) => setFormAgencyName(e.target.value)}
-                    placeholder="Ej: Real State Diego"
-                    style={styles.inputField}
-                    required
+          <form onSubmit={handleSaveAgency} style={styles.formStack}>
+
+            {/* 1. Nombre de la Inmobiliaria */}
+            <div style={styles.inputStack}>
+              <label style={styles.label}>Nombre de la Inmobiliaria *</label>
+              <input
+                type="text"
+                value={formAgencyName}
+                onChange={(e) => setFormAgencyName(e.target.value)}
+                placeholder="Ej: Real State Diego"
+                style={styles.inputField}
+                required
+                disabled={isSavingAgency}
+              />
+            </div>
+
+            {/* 2. Logo */}
+            <div style={styles.inputStack}>
+              <label style={styles.label}>Logo oficial</label>
+
+              {logoError && (
+                <div style={styles.logoErrorBox}>
+                  <AlertCircle size={13} color="#ef4444" />
+                  <span>{logoError}</span>
+                </div>
+              )}
+
+              {logoPreview ? (
+                <div style={styles.logoPreviewCard}>
+                  <div style={styles.logoPreviewBox}>
+                    <img
+                      src={logoPreview}
+                      alt="Preview logo"
+                      style={styles.logoPreviewImg}
+                      onError={(e) => {
+                        if (e.target.src !== logoDefault) {
+                          e.target.src = logoDefault;
+                        }
+                      }}
+                    />
+                  </div>
+                  <div style={styles.logoActionBtns}>
+                    <label htmlFor="edit-agency-logo-input" style={styles.changeLogoBtn}>
+                      <Camera size={13} color="#0f172a" />
+                      <span>Cambiar logo</span>
+                    </label>
+                    <button
+                      type="button"
+                      style={styles.removeLogoBtn}
+                      onClick={() => setLogoPreview(null)}
+                      disabled={isSavingAgency}
+                    >
+                      <Trash2 size={13} color="#ef4444" />
+                      <span>Eliminar</span>
+                    </button>
+                  </div>
+                  <input
+                    type="file"
+                    id="edit-agency-logo-input"
+                    accept="image/*"
+                    onChange={handleLogoChange}
+                    style={{ display: 'none' }}
                     disabled={isSavingAgency}
                   />
                 </div>
-
-                {/* 2. Logo */}
-                <div style={styles.inputStack}>
-                  <label style={styles.label}>Logo oficial</label>
-                  
-                  {logoError && (
-                    <div style={styles.logoErrorBox}>
-                      <AlertCircle size={13} color="#ef4444" />
-                      <span>{logoError}</span>
-                    </div>
-                  )}
-
-                  {logoPreview ? (
-                    <div style={styles.logoPreviewCard}>
-                      <div style={styles.logoPreviewBox}>
-                        <img 
-                          src={logoPreview} 
-                          alt="Preview logo" 
-                          style={styles.logoPreviewImg}
-                          onError={(e) => {
-                            if (e.target.src !== logoDefault) {
-                              e.target.src = logoDefault;
-                            }
-                          }}
-                        />
-                      </div>
-                      <div style={styles.logoActionBtns}>
-                        <label htmlFor="edit-agency-logo-input" style={styles.changeLogoBtn}>
-                          <Camera size={13} color="#0f172a" />
-                          <span>Cambiar logo</span>
-                        </label>
-                        <button 
-                          type="button" 
-                          style={styles.removeLogoBtn}
-                          onClick={() => setLogoPreview(null)}
-                          disabled={isSavingAgency}
-                        >
-                          <Trash2 size={13} color="#ef4444" />
-                          <span>Eliminar</span>
-                        </button>
-                      </div>
-                      <input 
-                        type="file" 
-                        id="edit-agency-logo-input" 
-                        accept="image/*"
-                        onChange={handleLogoChange}
-                        style={{ display: 'none' }}
-                        disabled={isSavingAgency}
-                      />
-                    </div>
-                  ) : (
-                    <div style={styles.uploadDashedBox}>
-                      <input 
-                        type="file" 
-                        id="edit-agency-logo-input" 
-                        accept="image/*"
-                        onChange={handleLogoChange}
-                        style={{ display: 'none' }}
-                        disabled={isSavingAgency}
-                      />
-                      <label htmlFor="edit-agency-logo-input" style={styles.uploadLabel}>
-                        <div style={styles.uploadIconCircle}>
-                          <Upload size={17} color="#4f46e5" />
-                        </div>
-                        <span style={styles.uploadTitle}>Subir logo de la inmobiliaria</span>
-                        <span style={styles.uploadSub}>PNG, JPG o WEBP (máx. 5MB)</span>
-                      </label>
-                    </div>
-                  )}
-                </div>
-
-                {/* 3. País */}
-                <div style={styles.inputStack}>
-                  <label style={styles.label}>País *</label>
-                  <select 
-                    value={formCountry}
-                    onChange={handleCountryChange}
-                    style={styles.selectField}
+              ) : (
+                <div style={styles.uploadDashedBox}>
+                  <input
+                    type="file"
+                    id="edit-agency-logo-input"
+                    accept="image/*"
+                    onChange={handleLogoChange}
+                    style={{ display: 'none' }}
                     disabled={isSavingAgency}
-                    required
-                  >
-                    {getCountries().map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
+                  />
+                  <label htmlFor="edit-agency-logo-input" style={styles.uploadLabel}>
+                    <div style={styles.uploadIconCircle}>
+                      <Upload size={17} color="#4f46e5" />
+                    </div>
+                    <span style={styles.uploadTitle}>Subir logo de la inmobiliaria</span>
+                    <span style={styles.uploadSub}>PNG, JPG o WEBP (máx. 5MB)</span>
+                  </label>
                 </div>
+              )}
+            </div>
 
-                {/* 4. Provincia / Depto. y Ciudad en fila */}
-                <div style={styles.formRow}>
-                  <div style={{ ...styles.inputStack, flex: 1 }}>
-                    <label style={styles.label}>Provincia / Depto. *</label>
-                    <select 
-                      value={formState}
-                      onChange={handleStateChange}
-                      style={styles.selectField}
-                      disabled={isSavingAgency || availableStates.length === 0}
-                      required
-                    >
-                      {availableStates.map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                  </div>
+            {/* 3. País */}
+            <div style={styles.inputStack}>
+              <label style={styles.label}>País *</label>
+              <select
+                value={formCountry}
+                onChange={handleCountryChange}
+                style={styles.selectField}
+                disabled={isSavingAgency}
+                required
+              >
+                {getCountries().map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
 
-                  <div style={{ ...styles.inputStack, flex: 1 }}>
-                    <label style={styles.label}>Ciudad *</label>
-                    <select 
-                      value={formCity}
-                      onChange={(e) => setFormCity(e.target.value)}
-                      style={styles.selectField}
-                      disabled={isSavingAgency || availableCities.length === 0}
-                      required
-                    >
-                      {formCity && !availableCities.includes(formCity) && (
-                        <option value={formCity}>{formCity}</option>
-                      )}
-                      {availableCities.map((ct) => (
-                        <option key={ct} value={ct}>{ct}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {/* 5. Sitio Web */}
-                <div style={styles.inputStack}>
-                  <label style={styles.label}>Sitio Web de la Inmobiliaria</label>
-                  <div style={styles.urlInputWrap}>
-                    <span style={styles.urlPrefix}>https://</span>
-                    <input 
-                      type="text" 
-                      value={formAgencyWebsite}
-                      onChange={(e) => setFormAgencyWebsite(e.target.value.replace(/^https?:\/\//i, ''))}
-                      placeholder="www.miinmobiliaria.com"
-                      style={styles.urlInputField}
-                      disabled={isSavingAgency}
-                    />
-                  </div>
-                  <span style={styles.formHint}>Dominio de tu portal para compartir e informes</span>
-                </div>
-
-                {/* Botón Guardar */}
-                <button 
-                  type="submit" 
-                  style={{
-                    ...styles.submitBtn,
-                    opacity: isSavingAgency ? 0.75 : 1,
-                    cursor: isSavingAgency ? 'not-allowed' : 'pointer'
-                  }}
-                  disabled={isSavingAgency}
+            {/* 4. Provincia / Depto. y Ciudad en fila */}
+            <div style={styles.formRow}>
+              <div style={{ ...styles.inputStack, flex: 1 }}>
+                <label style={styles.label}>Provincia / Depto. *</label>
+                <select
+                  value={formState}
+                  onChange={handleStateChange}
+                  style={styles.selectField}
+                  disabled={isSavingAgency || availableStates.length === 0}
+                  required
                 >
-                  {isSavingAgency ? (
-                    <>
-                      <Loader2 size={16} color="#ffffff" style={{ animation: 'spin 1s linear infinite' }} />
-                      <span>Guardando cambios...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check size={16} color="#ffffff" strokeWidth={2.5} />
-                      <span>Guardar cambios</span>
-                    </>
+                  {availableStates.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ ...styles.inputStack, flex: 1 }}>
+                <label style={styles.label}>Ciudad *</label>
+                <select
+                  value={formCity}
+                  onChange={(e) => setFormCity(e.target.value)}
+                  style={styles.selectField}
+                  disabled={isSavingAgency || availableCities.length === 0}
+                  required
+                >
+                  {formCity && !availableCities.includes(formCity) && (
+                    <option value={formCity}>{formCity}</option>
                   )}
-                </button>
-              </form>
+                  {availableCities.map((ct) => (
+                    <option key={ct} value={ct}>{ct}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* 5. Sitio Web */}
+            <div style={styles.inputStack}>
+              <label style={styles.label}>Sitio Web de la Inmobiliaria</label>
+              <div style={styles.urlInputWrap}>
+                <span style={styles.urlPrefix}>https://</span>
+                <input
+                  type="text"
+                  value={formAgencyWebsite}
+                  onChange={(e) => setFormAgencyWebsite(e.target.value.replace(/^https?:\/\//i, ''))}
+                  placeholder="www.miinmobiliaria.com"
+                  style={styles.urlInputField}
+                  disabled={isSavingAgency}
+                />
+              </div>
+              <span style={styles.formHint}>Dominio de tu portal para compartir e informes</span>
+            </div>
+
+            {/* Botón Guardar */}
+            <button
+              type="submit"
+              style={{
+                ...styles.submitBtn,
+                opacity: isSavingAgency ? 0.75 : 1,
+                cursor: isSavingAgency ? 'not-allowed' : 'pointer'
+              }}
+              disabled={isSavingAgency}
+            >
+              {isSavingAgency ? (
+                <>
+                  <Loader2 size={16} color="#ffffff" style={{ animation: 'spin 1s linear infinite' }} />
+                  <span>Guardando cambios...</span>
+                </>
+              ) : (
+                <>
+                  <Check size={16} color="#ffffff" strokeWidth={2.5} />
+                  <span>Guardar cambios</span>
+                </>
+              )}
+            </button>
+          </form>
         </BottomSheet>
       )}
 
@@ -890,8 +889,8 @@ export default function OwnerDashboard({
                 <label style={styles.label}>
                   Correo electrónico del inspector <span style={{ color: '#ef4444' }}>*</span>
                 </label>
-                <input 
-                  type="email" 
+                <input
+                  type="email"
                   value={inviteEmail}
                   onChange={(e) => {
                     setInviteEmail(e.target.value);
@@ -909,8 +908,8 @@ export default function OwnerDashboard({
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '9px', marginTop: '6px' }}>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   style={{
                     ...styles.submitBtn,
                     opacity: isSubmittingInvite ? 0.75 : 1,
@@ -962,41 +961,22 @@ export default function OwnerDashboard({
         <BottomSheet
           isOpen={isManagePlanOpen}
           onClose={() => setIsManagePlanOpen(false)}
-          title="Gestión de Suscripción"
+          title="Detalles del Plan"
           size="auto"
         >
           <div style={styles.managePlanContent}>
-            {/* Icono de Computadora */}
+            {/* Icono de Inmobiliaria */}
             <div style={styles.managePlanIconWrap}>
               <Laptop size={26} color="#4f46e5" strokeWidth={2.2} />
             </div>
 
             <div style={{ textAlign: 'center' }}>
               <h4 style={styles.managePlanTitle}>
-                {plan?.name || 'Plan Free'}
+                {plan?.name || 'Plan Inmobiliario'}
               </h4>
               <p style={styles.managePlanSubtitle}>
-                Para cambiar de plan, ampliar límites de propiedades o gestionar tus métodos de pago, ingresá desde tu computadora a la versión de escritorio:
+                Capacidades y cupos autorizados actualmente para tu inmobiliaria:
               </p>
-            </div>
-
-            {/* Tarjeta con el enlace aitemsapp.com */}
-            <div style={styles.desktopLinkCard}>
-              <div style={styles.desktopLinkIconBox}>
-                <Globe size={18} color="#4f46e5" />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <span style={styles.desktopLinkSiteTitle}>aitemsapp.com</span>
-                <span style={styles.desktopLinkSiteDesc}>Plataforma web de escritorio</span>
-              </div>
-              <a
-                href="https://aitemsapp.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                style={styles.desktopLinkActionBtn}
-              >
-                <ExternalLink size={14} color="#4f46e5" />
-              </a>
             </div>
 
             {/* Resumen de límites actuales */}
@@ -1012,26 +992,16 @@ export default function OwnerDashboard({
               </div>
               <div style={styles.managePlanStatDivider} />
               <div style={styles.managePlanStatItem}>
-                <span style={styles.managePlanStatVal}>{plan?.renewalDate || 'Sin vencimiento'}</span>
-                <span style={styles.managePlanStatKey}>Renovación</span>
+                <span style={styles.managePlanStatVal}>{plan?.renewalDate || 'Activo'}</span>
+                <span style={styles.managePlanStatKey}>Estado</span>
               </div>
             </div>
 
-            {/* Botones de acción */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '9px', width: '100%', marginTop: '4px' }}>
-              <a
-                href="https://aitemsapp.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                style={styles.openDesktopWebBtn}
-              >
-                <ExternalLink size={16} strokeWidth={2.4} />
-                <span>Abrir aitemsapp.com</span>
-              </a>
-
+            {/* Botón de cierre */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '9px', width: '100%', marginTop: '12px' }}>
               <button
                 type="button"
-                style={styles.closeManagePlanBtn}
+                style={styles.openDesktopWebBtn}
                 onClick={() => setIsManagePlanOpen(false)}
               >
                 <span>Entendido</span>
