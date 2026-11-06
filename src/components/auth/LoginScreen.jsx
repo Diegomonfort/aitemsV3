@@ -160,7 +160,7 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
       }
       if (profileRes?.code === 'AGENT_PLAN_RESTRICTED' || (profileRes?.status === 403 && profileRes?.code === 'AGENT_PLAN_RESTRICTED')) {
         await authService.signOut();
-        setError(profileRes.message || 'Tu cuenta de inspector está vinculada a una inmobiliaria con Plan Free. El acceso para inspectores está suspendido hasta que el titular actualice su suscripción.');
+        setError(profileRes.message || 'El acceso para inspectores se encuentra suspendido para esta inmobiliaria. Contactá al administrador de tu organización.');
         return;
       }
     } catch (e) {
@@ -760,8 +760,6 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
               <h1 style={styles.title}>
                 {activeMode === 'login'
                   ? 'Bienvenido a Aitems'
-                  : activeMode === 'register'
-                  ? 'Crear Cuenta'
                   : forgotStep === 'request'
                   ? 'Recuperar contraseña'
                   : forgotStep === 'verify'
@@ -773,8 +771,6 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
               <p style={styles.subtitle}>
                 {activeMode === 'login'
                   ? 'Iniciá sesión para gestionar tus propiedades e inventarios'
-                  : activeMode === 'register'
-                  ? 'Únete a la plataforma líder en gestión de inventarios Inmobiliarios'
                   : forgotStep === 'request'
                   ? 'Ingresá tu correo para recibir un código de recuperación'
                   : forgotStep === 'verify'
@@ -910,7 +906,8 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
             )}
 
             {/* ============ FORMULARIO REGISTRO ============ */}
-            {activeMode === 'register' && (
+            {/* Oculto temporalmente para Apple Guideline 3.1.1 B2B Companion App */}
+            {false && activeMode === 'register' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {/* Selector secundario: Titular vs Invitado */}
                 <div style={{
