@@ -25,8 +25,15 @@ export const agencyService = {
   /**
    * Crea una nueva invitación para un inspector/agente por email
    */
-  async createInvitation(email, role = 'agent') {
-    return await api.post('/api/inmobiliarias/invitations', { email, role });
+  async createInvitation(email, role = 'agent', name = '') {
+    return await api.post('/api/inmobiliarias/invitations', { email, role, name });
+  },
+
+  /**
+   * Genera una nueva contraseña temporal para un inspector del equipo.
+   */
+  async resetAgentPassword(agentId) {
+    return await api.post(`/api/inmobiliarias/agents/${agentId}/reset-password`);
   },
 
   /**
@@ -34,6 +41,13 @@ export const agencyService = {
    */
   async cancelInvitation(invitationId) {
     return await api.delete(`/api/inmobiliarias/invitations/${invitationId}`);
+  },
+
+  /**
+   * Reenvía el email de una invitación pendiente
+   */
+  async resendInvitation(invitationId) {
+    return await api.post(`/api/inmobiliarias/invitations/${invitationId}/resend`);
   },
 
   /**

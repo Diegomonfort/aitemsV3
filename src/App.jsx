@@ -69,6 +69,7 @@ import EditPropertyModal from './components/EditPropertyModal';
 import PropertyLogsModal from './components/PropertyLogsModal';
 import LoginScreen from './components/auth/LoginScreen';
 import VerifyEmailScreen from './components/auth/VerifyEmailScreen';
+import ChangePasswordScreen from './components/auth/ChangePasswordScreen';
 import CreateInmobiliariaScreen from './components/auth/CreateInmobiliariaScreen';
 import { useAuth } from './context/AuthContext';
 import { propertyService } from './services/propertyService';
@@ -524,8 +525,13 @@ export default function App() {
     setAgents(prev => [newAgent, ...prev]);
   };
 
-  const handleResendInvite = async (agentId) => {
-    // Confirmación visual
+  const handleResendInvite = async (invitationId) => {
+    const res = await agencyService.resendInvitation(invitationId);
+    if (res?.success) {
+      toast.success(res.message || 'Invitación reenviada');
+    } else {
+      toast.error(res?.message || 'No se pudo reenviar la invitación');
+    }
   };
 
   // Sincronizar estado reactivo con AuthContext
@@ -3545,6 +3551,26 @@ export default function App() {
     );
   }
 
+  // Inspector creado por la inmobiliaria con contraseña temporal: debe elegir una propia antes de entrar
+  if (authUser?.must_change_password) {
+    return (
+      <div className="app-container app-auth-container" style={styles.appContainer}>
+        <ChangePasswordScreen
+          email={authUser.email}
+          onLogout={handleLogout}
+          onDone={() => {
+            toast.success('¡Contraseña actualizada! Bienvenido a Aitems.');
+            setAuthView('app');
+            setActiveTab('home');
+            loadProperties();
+            loadColleagues();
+            loadAgencyInfo();
+          }}
+        />
+      </div>
+    );
+  }
+
   // Renderizado condicional de vistas de inicio / autenticación
   if (authView === 'login') {
     return (
@@ -3638,8 +3664,8 @@ export default function App() {
                   <User size={22} color="#ffffff" />
                 </div>
                 <div style={styles.drawerUserInfo}>
-                  <h4 style={styles.drawerUserName}>{currentUser?.name || currentUser?.email?.split('@')[0] || 'Diego M'}</h4>
-                  <span style={styles.drawerUserEmail}>{currentUser?.email || 'monfortdiego@gmail.com'}</span>
+                  <h4 style={styles.drawerUserName}>{currentUser?.name || currentUser?.email?.split('@')[0] || ''}</h4>
+                  <span style={styles.drawerUserEmail}>{currentUser?.email || ''}</span>
                 </div>
               </div>
 

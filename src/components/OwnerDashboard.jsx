@@ -62,10 +62,10 @@ export default function OwnerDashboard({
   const [inviteEmail, setInviteEmail] = useState('');
   const [isSubmittingInvite, setIsSubmittingInvite] = useState(false);
   const [inviteError, setInviteError] = useState('');
-  const [createdInviteLink, setCreatedInviteLink] = useState('');
-  const [createdInviteCode, setCreatedInviteCode] = useState('');
-  const [hasCopiedLink, setHasCopiedLink] = useState(false);
-  const [hasCopiedCode, setHasCopiedCode] = useState(false);
+  const [inviteName, setInviteName] = useState('');
+  // Credenciales del inspector recién creado: { email, temporaryPassword }
+  const [createdCredentials, setCreatedCredentials] = useState(null);
+  const [copiedField, setCopiedField] = useState('');
 
   // Toast global
   const showToast = (msg) => toast.success(msg);
@@ -189,30 +189,27 @@ export default function OwnerDashboard({
     setInviteError('');
 
     try {
-      const res = await agencyService.createInvitation(cleanEmail, 'agent');
-      if (res && (res.success || res.invitation)) {
-        toast.success(`Invitación enviada por email a ${cleanEmail}`);
-        const code = res.code || res.invitation?.invitation_token || '';
-        const link = res.invitationLink || (code ? `https://aitemsapp.com/accept-invitation?token=${code}` : '');
-        setCreatedInviteCode(code);
-        setCreatedInviteLink(link);
+      const res = await agencyService.createInvitation(cleanEmail, 'agent', inviteName.trim());
+      if (res && res.success && res.credentials) {
+        toast.success(`Inspector ${cleanEmail} creado`);
+        setCreatedCredentials(res.credentials);
 
         if (onAddAgent) {
           onAddAgent({
-            id: res.invitation?.id || Date.now(),
-            name: cleanEmail.split('@')[0],
+            id: res.agent?.id || Date.now(),
+            name: res.agent?.name || inviteName.trim() || cleanEmail.split('@')[0],
             email: cleanEmail,
             role: 'agent',
-            status: 'invited',
+            status: 'active',
             joined: new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }),
           });
         }
       } else {
-        throw new Error(res?.message || res?.error || 'Error al enviar la invitación');
+        throw new Error(res?.message || res?.error || 'No se pudo crear el inspector');
       }
     } catch (err) {
-      console.error('Error enviando invitación:', err);
-      const msg = err.response?.data?.message || err.message || 'No se pudo enviar la invitación';
+      console.error('Error creando inspector:', err);
+      const msg = err.response?.data?.message || err.message || 'No se pudo crear el inspector';
       setInviteError(msg);
       toast.error(msg);
     } finally {
@@ -220,37 +217,31 @@ export default function OwnerDashboard({
     }
   };
 
-  const handleCopyInviteCode = () => {
-    if (!createdInviteCode) return;
-    navigator.clipboard.writeText(createdInviteCode);
-    setHasCopiedCode(true);
-    toast.success('¡Código de invitación copiado!');
-    setTimeout(() => setHasCopiedCode(false), 3000);
+  const buildCredentialsText = () => {
+    if (!createdCredentials) return '';
+    const inmo = agency?.name || 'Aitems';
+    return `¡Hola! Ya tenés tu cuenta de inspector de ${inmo} en Aitems.\n\nEmail: ${createdCredentials.email}\nContraseña temporal: ${createdCredentials.temporaryPassword}\n\nDescargá la app de Aitems, iniciá sesión con estos datos y elegí tu propia contraseña al entrar.`;
+  };
+
+  const handleCopyCredential = (field, value, message) => {
+    if (!value) return;
+    navigator.clipboard.writeText(value);
+    setCopiedField(field);
+    toast.success(message);
+    setTimeout(() => setCopiedField(''), 2500);
   };
 
   const handleShareWhatsApp = () => {
-    const code = createdInviteCode;
-    const inmo = agency?.name || 'Aitems';
-    const text = `¡Hola! Te invito a unirte al equipo de ${inmo} en Aitems.\n\n1. Descargá o abrí la App de Aitems\n2. Tocá en "Registrarse" y elegí "Tengo código de invitación"\n3. Ingresá este código de 6 caracteres: *${code}*`;
-    window.open(`https://api.whatsapp.com/send/?text=${encodeURIComponent(text)}`, '_blank');
-  };
-
-  const handleCopyInviteLink = () => {
-    if (!createdInviteLink) return;
-    navigator.clipboard.writeText(createdInviteLink);
-    setHasCopiedLink(true);
-    toast.success('¡Enlace de invitación copiado al portapapeles!');
-    setTimeout(() => setHasCopiedLink(false), 3000);
+    window.open(`https://api.whatsapp.com/send/?text=${encodeURIComponent(buildCredentialsText())}`, '_blank');
   };
 
   const handleCloseInviteModal = () => {
     setIsInviteAgentOpen(false);
     setInviteEmail('');
+    setInviteName('');
     setInviteError('');
-    setCreatedInviteLink('');
-    setCreatedInviteCode('');
-    setHasCopiedLink(false);
-    setHasCopiedCode(false);
+    setCreatedCredentials(null);
+    setCopiedField('');
     setIsSubmittingInvite(false);
   };
 
@@ -425,10 +416,7 @@ export default function OwnerDashboard({
                     <button 
                       type="button" 
                       style={styles.resendActionBtn}
-                      onClick={() => {
-                        onResendInvite(agent.id);
-                        showToast(`Reenviado a ${agent.email}`);
-                      }}
+                      onClick={() => onResendInvite(agent.id)}
                       title="Reenviar invitación"
                     >
                       <RotateCw size={12} color="#4f46e5" />
@@ -465,7 +453,7 @@ export default function OwnerDashboard({
                     type="text" 
                     value={formAgencyName}
                     onChange={(e) => setFormAgencyName(e.target.value)}
-                    placeholder="Ej: Real State Diego"
+                    placeholder="Ej: Inmobiliaria del Sur"
                     style={styles.inputField}
                     required
                     disabled={isSavingAgency}
@@ -644,10 +632,10 @@ export default function OwnerDashboard({
         <BottomSheet
           isOpen={isInviteAgentOpen}
           onClose={handleCloseInviteModal}
-          title={createdInviteLink ? '¡Invitación enviada!' : 'Invitar nuevo inspector'}
+          title={createdCredentials ? '¡Inspector creado!' : 'Nuevo inspector'}
           size="auto"
         >
-          {createdInviteLink ? (
+          {createdCredentials ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '4px 0 10px 0' }}>
               <div style={{
                 width: '48px',
@@ -665,188 +653,156 @@ export default function OwnerDashboard({
 
               <div style={{ textAlign: 'center' }}>
                 <h4 style={{ fontSize: '16px', fontWeight: '800', color: '#0f172a', margin: '0 0 6px 0' }}>
-                  Invitación enviada
+                  Cuenta lista
                 </h4>
                 <p style={{ fontSize: '13px', color: '#64748b', lineHeight: '1.45', margin: 0 }}>
-                  Se envió un correo a <strong>{inviteEmail}</strong> con las instrucciones de acceso para unirse a <strong>{agency?.name || 'la inmobiliaria'}</strong>.
+                  Compartile estos datos. Al iniciar sesión por primera vez le vamos a pedir que elija su propia contraseña.
                 </p>
               </div>
 
-              {/* Tarjeta con CÓDIGO DE ACCESO PARA APP */}
-              {createdInviteCode && (
-                <div style={{
-                  backgroundColor: '#f0fdf4',
-                  border: '1.5px dashed #86efac',
-                  borderRadius: '16px',
-                  padding: '16px 14px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '10px',
-                  textAlign: 'center',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                    <span style={{ fontSize: '11px', fontWeight: '800', color: '#166534', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                      CÓDIGO PARA APP MÓVIL
-                    </span>
-                    <span style={{
-                      fontSize: '10px',
-                      fontWeight: '700',
-                      color: '#15803d',
-                      backgroundColor: '#dcfce7',
-                      padding: '2px 8px',
-                      borderRadius: '10px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                    }}>
-                      <Clock size={10} /> 7 días
-                    </span>
-                  </div>
-
-                  <div style={{
-                    fontSize: '30px',
-                    fontWeight: '900',
-                    letterSpacing: '8px',
-                    color: '#14532d',
-                    fontFamily: 'monospace',
-                    background: '#ffffff',
-                    padding: '8px 24px',
-                    borderRadius: '12px',
-                    border: '1.5px solid #bbf7d0',
-                    boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
-                    userSelect: 'all',
-                    width: '100%',
-                    boxSizing: 'border-box',
-                  }}>
-                    {createdInviteCode}
-                  </div>
-
-                  <span style={{ fontSize: '12px', color: '#4b5563', lineHeight: 1.35 }}>
-                    El inspector descarga la app y elige <strong>"Tengo código de invitación"</strong> al registrarse.
-                  </span>
-
-                  <div style={{ display: 'flex', gap: '8px', width: '100%', marginTop: '2px' }}>
-                    <button
-                      type="button"
-                      onClick={handleCopyInviteCode}
-                      style={{
-                        flex: 1,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '6px',
-                        height: '40px',
-                        borderRadius: '10px',
-                        backgroundColor: hasCopiedCode ? '#dcfce7' : '#ffffff',
-                        color: hasCopiedCode ? '#15803d' : '#166534',
-                        border: hasCopiedCode ? '1px solid #86efac' : '1px solid #bbf7d0',
-                        fontSize: '12.5px',
-                        fontWeight: '700',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {hasCopiedCode ? (
-                        <>
-                          <Check size={14} strokeWidth={2.6} />
-                          <span>¡Copiado!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy size={14} />
-                          <span>Copiar código</span>
-                        </>
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleShareWhatsApp}
-                      style={{
-                        flex: 1,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '6px',
-                        height: '40px',
-                        borderRadius: '10px',
-                        backgroundColor: '#25D366',
-                        color: '#ffffff',
-                        border: 'none',
-                        fontSize: '12.5px',
-                        fontWeight: '700',
-                        cursor: 'pointer',
-                        boxShadow: '0 2px 6px rgba(37,211,102,0.3)',
-                      }}
-                    >
-                      <span>WhatsApp</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Tarjeta con enlace directo (Web) */}
+              {/* Tarjeta con las credenciales de acceso */}
               <div style={{
-                backgroundColor: '#f8fafc',
-                border: '1px solid #e2e8f0',
-                borderRadius: '14px',
-                padding: '12px 14px',
+                backgroundColor: '#f0fdf4',
+                border: '1.5px dashed #86efac',
+                borderRadius: '16px',
+                padding: '16px 14px',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '8px',
+                gap: '12px',
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>
-                    O Enlace directo para navegador
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: '800', color: '#166534', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Email
                   </span>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{
+                      flex: 1,
+                      background: '#ffffff',
+                      border: '1.5px solid #bbf7d0',
+                      borderRadius: '10px',
+                      padding: '9px 11px',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      letterSpacing: '0',
+                      fontFamily: 'inherit',
+                      color: '#14532d',
+                      userSelect: 'all',
+                      wordBreak: 'break-all',
+                    }}>
+                      {createdCredentials.email}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyCredential('email', createdCredentials.email, 'Email copiado')}
+                      style={{
+                        width: '44px',
+                        borderRadius: '10px',
+                        backgroundColor: copiedField === 'email' ? '#dcfce7' : '#ffffff',
+                        border: '1px solid #bbf7d0',
+                        color: '#166534',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {copiedField === 'email' ? <Check size={15} strokeWidth={2.6} /> : <Copy size={15} />}
+                    </button>
+                  </div>
                 </div>
-
-                <div style={{
-                  backgroundColor: '#ffffff',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: '10px',
-                  padding: '9px 11px',
-                  fontSize: '11.5px',
-                  color: '#334155',
-                  wordBreak: 'break-all',
-                  fontFamily: 'monospace',
-                }}>
-                  {createdInviteLink}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: '800', color: '#166534', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Contraseña temporal
+                  </span>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{
+                      flex: 1,
+                      background: '#ffffff',
+                      border: '1.5px solid #bbf7d0',
+                      borderRadius: '10px',
+                      padding: '9px 11px',
+                      fontSize: '20px',
+                      fontWeight: '900',
+                      letterSpacing: '3px',
+                      fontFamily: 'monospace',
+                      color: '#14532d',
+                      userSelect: 'all',
+                      wordBreak: 'break-all',
+                    }}>
+                      {createdCredentials.temporaryPassword}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyCredential('password', createdCredentials.temporaryPassword, 'Contraseña temporal copiado')}
+                      style={{
+                        width: '44px',
+                        borderRadius: '10px',
+                        backgroundColor: copiedField === 'password' ? '#dcfce7' : '#ffffff',
+                        border: '1px solid #bbf7d0',
+                        color: '#166534',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {copiedField === 'password' ? <Check size={15} strokeWidth={2.6} /> : <Copy size={15} />}
+                    </button>
+                  </div>
                 </div>
+              </div>
 
+              <div style={{ display: 'flex', gap: '8px' }}>
                 <button
                   type="button"
+                  onClick={() => handleCopyCredential('all', buildCredentialsText(), 'Datos de acceso copiados')}
                   style={{
+                    flex: 1,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '6px',
-                    width: '100%',
-                    height: '36px',
+                    height: '42px',
                     borderRadius: '10px',
-                    backgroundColor: hasCopiedLink ? '#ecfdf5' : '#eef2ff',
-                    color: hasCopiedLink ? '#059669' : '#4f46e5',
-                    border: hasCopiedLink ? '1px solid #a7f3d0' : '1px solid #e0e7ff',
-                    fontSize: '12px',
+                    backgroundColor: copiedField === 'all' ? '#ecfdf5' : '#eef2ff',
+                    color: copiedField === 'all' ? '#059669' : '#4f46e5',
+                    border: copiedField === 'all' ? '1px solid #a7f3d0' : '1px solid #e0e7ff',
+                    fontSize: '12.5px',
                     fontWeight: '700',
                     cursor: 'pointer',
-                    marginTop: '2px',
                   }}
-                  onClick={handleCopyInviteLink}
                 >
-                  {hasCopiedLink ? (
-                    <>
-                      <Check size={14} strokeWidth={2.6} />
-                      <span>¡Enlace copiado!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy size={14} />
-                      <span>Copiar enlace web</span>
-                    </>
-                  )}
+                  {copiedField === 'all' ? <Check size={14} strokeWidth={2.6} /> : <Copy size={14} />}
+                  <span>{copiedField === 'all' ? '¡Copiado!' : 'Copiar todo'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleShareWhatsApp}
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    backgroundColor: '#25D366',
+                    color: '#ffffff',
+                    border: 'none',
+                    fontSize: '12.5px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 6px rgba(37,211,102,0.3)',
+                  }}
+                >
+                  <span>WhatsApp</span>
                 </button>
               </div>
+
+              <p style={{ fontSize: '11.5px', color: '#94a3b8', textAlign: 'center', margin: 0, lineHeight: 1.4 }}>
+                También se los enviamos por email. Guardá la contraseña ahora: no se vuelve a mostrar.
+              </p>
 
               <button
                 type="button"
@@ -903,8 +859,20 @@ export default function OwnerDashboard({
                   autoFocus
                   required
                 />
+              </div>
+
+              <div style={styles.inputStack}>
+                <label style={styles.label}>Nombre (opcional)</label>
+                <input
+                  type="text"
+                  value={inviteName}
+                  onChange={(e) => setInviteName(e.target.value)}
+                  placeholder="Nombre y apellido"
+                  style={styles.inputField}
+                  disabled={isSubmittingInvite}
+                />
                 <span style={styles.formHint}>
-                  Se le enviará un correo con el enlace para sumarse al equipo de inspectores de la inmobiliaria.
+                  Creamos la cuenta con una contraseña temporal. El inspector solo inicia sesión en la app y elige su propia contraseña.
                 </span>
               </div>
 
@@ -921,12 +889,12 @@ export default function OwnerDashboard({
                   {isSubmittingInvite ? (
                     <>
                       <Loader2 size={15} color="#ffffff" style={{ animation: 'spin 1s linear infinite' }} />
-                      <span>Enviando invitación...</span>
+                      <span>Creando inspector...</span>
                     </>
                   ) : (
                     <>
-                      <Mail size={15} strokeWidth={2.4} />
-                      <span>Enviar invitación</span>
+                      <UserPlus size={15} strokeWidth={2.4} />
+                      <span>Crear inspector</span>
                     </>
                   )}
                 </button>

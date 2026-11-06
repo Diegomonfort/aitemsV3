@@ -63,11 +63,11 @@ export default function AjustesScreen({
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
   // Edit profile form
-  const [formName, setFormName] = useState(currentUser?.name || 'Diego M');
-  const [formEmail, setFormEmail] = useState(currentUser?.email || 'monfortdiego@gmail.com');
+  const [formName, setFormName] = useState(currentUser?.name || '');
+  const [formEmail, setFormEmail] = useState(currentUser?.email || '');
   const [formCountry, setFormCountry] = useState(currentUser?.country || 'Uruguay');
-  const [formState, setFormState] = useState(currentUser?.state || 'Maldonado');
-  const [formCity, setFormCity] = useState(currentUser?.city || 'Punta del Este');
+  const [formState, setFormState] = useState(currentUser?.state || '');
+  const [formCity, setFormCity] = useState(currentUser?.city || '');
 
   const [availableStates, setAvailableStates] = useState(() => getStates(formCountry));
   const [availableCities, setAvailableCities] = useState(() => getCities(formCountry, formState));
@@ -192,7 +192,7 @@ export default function AjustesScreen({
     if (currentUser?.email && currentUser.email.trim().length > 0) {
       return currentUser.email.trim().charAt(0).toUpperCase();
     }
-    return 'D';
+    return '?';
   };
 
   return (
@@ -217,8 +217,8 @@ export default function AjustesScreen({
             <span>{getUserInitial()}</span>
           </div>
           <div style={styles.userInfo}>
-            <h2 style={styles.userName}>{currentUser?.name || 'Diego M'}</h2>
-            <p style={styles.userSubtitle}>{agency?.name || 'Real State Diego'}</p>
+            <h2 style={styles.userName}>{currentUser?.name || currentUser?.email || ''}</h2>
+            <p style={styles.userSubtitle}>{agency?.name || ''}</p>
           </div>
           <button
             style={styles.editBtn}
@@ -239,10 +239,10 @@ export default function AjustesScreen({
             />
           </div>
           <div style={styles.agencyInfo}>
-            <h3 style={styles.agencyName}>{agency?.name || 'Real State Diego'}</h3>
+            <h3 style={styles.agencyName}>{agency?.name || 'Mi inmobiliaria'}</h3>
             <p style={styles.agencyLocation}>{agency?.location || agency?.country || 'Uruguay'}</p>
             <span style={styles.agencyStats}>
-              {agentsCount || 4} Agentes | {propertiesCount || 20} Propiedades
+              {agentsCount} Agentes | {propertiesCount} Propiedades
             </span>
           </div>
         </section>

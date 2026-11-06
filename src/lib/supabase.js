@@ -170,8 +170,10 @@ export const authService = {
   // Actualizar contraseña una vez verificada la sesión de recuperación
   async updatePassword(newPassword) {
     try {
+      // También limpia el flag de contraseña temporal (cuentas creadas por la inmobiliaria)
       const { data, error } = await supabase.auth.updateUser({
         password: newPassword,
+        data: { must_change_password: false },
       });
       if (error) throw error;
       return { success: true, data };

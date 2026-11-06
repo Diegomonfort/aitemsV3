@@ -25,9 +25,17 @@ import { getCountries, getStates, getCities } from '../../data/locationData';
 import { api } from '../../services/api';
 import { agencyService } from '../../services/agencyService';
 
+// Por ahora el alta de cuentas se hace solo desde la web (PC): las inmobiliarias se registran ahí
+// y crean el acceso de sus inspectores con contraseña temporal. En la app solo se inicia sesión.
+// Poner en true para volver a mostrar "Crear cuenta" en la app.
+const REGISTRATION_ENABLED = false;
+const WEB_REGISTER_URL = 'aitemsapp.com';
+
 export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 'login' }) {
   // Modo activo: 'login' | 'register' | 'forgot'
-  const [activeMode, setActiveMode] = useState(initialMode);
+  const [activeMode, setActiveMode] = useState(
+    !REGISTRATION_ENABLED && initialMode === 'register' ? 'login' : initialMode
+  );
 
   // Campos Login
   const [loginEmail, setLoginEmail] = useState('');
@@ -778,7 +786,7 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
             </div>
 
             {/* Control Segmentado (solo en login/register) */}
-            {activeMode !== 'forgot' && (
+            {REGISTRATION_ENABLED && activeMode !== 'forgot' && (
               <div style={styles.segmentedControl}>
                 <button
                   type="button"
@@ -887,6 +895,17 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
                   <span>{isLoading ? 'Ingresando...' : 'Ingresar'}</span>
                   {!isLoading && <ArrowRight size={17} color="#ffffff" strokeWidth={2.4} />}
                 </button>
+
+                {!REGISTRATION_ENABLED && (
+                  <div style={styles.noAccountNote}>
+                    <p style={{ margin: 0 }}>
+                      <strong>¿Sos inspector?</strong> Pedile a tu inmobiliaria tu acceso: te van a pasar tu email y una contraseña temporal.
+                    </p>
+                    <p style={{ margin: '8px 0 0 0' }}>
+                      <strong>¿Querés registrar tu inmobiliaria?</strong> Hacelo desde una computadora en <strong>{WEB_REGISTER_URL}</strong>.
+                    </p>
+                  </div>
+                )}
               </form>
             )}
 
@@ -1578,6 +1597,17 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
 }
 
 const styles = {
+  noAccountNote: {
+    marginTop: 18,
+    padding: '14px 16px',
+    borderRadius: 14,
+    background: '#f8fafc',
+    border: '1px solid #e2e8f0',
+    color: '#64748b',
+    fontSize: 13,
+    lineHeight: 1.5,
+    textAlign: 'center',
+  },
   container: {
     width: '100%',
     height: '100%',
@@ -1888,3 +1918,6 @@ const styles = {
     transition: 'color 0.15s ease',
   },
 };
+
+// Estilos compartidos con otras pantallas de autenticación (p. ej. ChangePasswordScreen)
+export { styles as authStyles };
