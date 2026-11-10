@@ -331,9 +331,24 @@ export default function OwnerDashboard({
               <h3 style={styles.planCardTitle}>{plan?.name || 'Plan Free'}</h3>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={styles.planActivePill}>
+              <span style={{
+                ...styles.planActivePill,
+                ...(plan?.status === 'past_due'
+                  ? { backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }
+                  : plan?.status === 'cancel_scheduled' || plan?.status === 'downgrade_scheduled'
+                    ? { backgroundColor: 'rgba(245, 158, 11, 0.22)', color: '#fbbf24' }
+                    : {}),
+              }}>
                 <Check size={11} strokeWidth={3} />
-                <span>{plan?.status === 'active' || !plan?.status ? 'Activo' : plan.status}</span>
+                <span>
+                  {plan?.status === 'past_due'
+                    ? 'Pago pendiente'
+                    : plan?.status === 'cancel_scheduled'
+                      ? 'Cancela al vencer'
+                      : plan?.status === 'downgrade_scheduled'
+                        ? 'Cambio programado'
+                        : 'Activo'}
+                </span>
               </span>
               <button
                 type="button"
@@ -354,8 +369,10 @@ export default function OwnerDashboard({
             </div>
             <div style={styles.planStatDivider} />
             <div style={styles.planStat}>
-              <span style={styles.planStatVal}>{safeAgents.length} / {plan?.agentsLimit ?? 1}</span>
-              <span style={styles.planStatKey}>Agentes</span>
+              <span style={styles.planStatVal}>
+                {plan?.agentsUsed ?? (safeAgents.some(a => a.role === 'owner') ? safeAgents.length : safeAgents.length + 1)} / {plan?.agentsLimit ?? 1}
+              </span>
+              <span style={styles.planStatKey}>Usuarios</span>
             </div>
             <div style={styles.planStatDivider} />
             <div style={styles.planStat}>
@@ -378,8 +395,10 @@ export default function OwnerDashboard({
             type="button"
             style={styles.inviteBtn}
             onClick={() => {
-              if (plan?.name === 'Plan Free' || (plan?.agentsLimit && plan.agentsLimit <= 1)) {
-                toast.info('Tu inmobiliaria ha alcanzado el límite de inspectores disponibles.');
+              const totalUsers = plan?.agentsUsed ?? (safeAgents.some(a => a.role === 'owner') ? safeAgents.length : safeAgents.length + 1);
+              const limit = plan?.agentsLimit ?? 1;
+              if (plan?.name === 'Plan Free' || limit <= 1 || totalUsers >= limit) {
+                toast.info(`Tu inmobiliaria alcanzó el cupo de ${limit} ${limit === 1 ? 'usuario' : 'usuarios'} disponibles en tu plan actual.`);
                 return;
               }
               setIsInviteAgentOpen(true);
@@ -394,22 +413,24 @@ export default function OwnerDashboard({
           {safeAgents.map((agent, index) => {
             const isOwner = agent.role === 'owner';
             const isPending = agent.status === 'invited';
+            const isInactive = !isOwner && agent.access === 'inactive';
 
             return (
               <div
                 key={agent.id}
                 style={{
                   ...styles.agentRow,
-                  borderBottom: index === agents.length - 1 ? 'none' : '1px solid #f1f5f9'
+                  opacity: isInactive ? 0.68 : 1,
+                  borderBottom: index === safeAgents.length - 1 ? 'none' : '1px solid #f1f5f9'
                 }}
               >
                 {/* Avatar */}
                 <div style={{
                   ...styles.agentMiniAvatar,
-                  backgroundColor: isOwner ? '#0f172a' : '#f1f5f9',
-                  color: isOwner ? '#ffffff' : '#475569'
+                  backgroundColor: isOwner ? '#0f172a' : isInactive ? '#fef2f2' : '#f1f5f9',
+                  color: isOwner ? '#ffffff' : isInactive ? '#dc2626' : '#475569'
                 }}>
-                  {agent.name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
+                  {(agent.name || 'IN').split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
                 </div>
 
                 {/* Info */}
@@ -420,8 +441,20 @@ export default function OwnerDashboard({
                       <span style={styles.ownerPill}>Owner</span>
                     ) : isPending ? (
                       <span style={styles.pendingPill}>Invitado</span>
+                    ) : isInactive ? (
+                      <span style={{
+                        fontSize: '10px',
+                        fontWeight: '700',
+                        padding: '2px 7px',
+                        borderRadius: '6px',
+                        backgroundColor: '#fef2f2',
+                        color: '#dc2626',
+                        border: '1px solid #fecaca',
+                      }}>
+                        Inactivo · Sin cupo
+                      </span>
                     ) : (
-                      <span style={styles.agentPill}>Agente</span>
+                      <span style={styles.agentPill}>Inspector</span>
                     )}
                   </div>
                   <span style={styles.agentEmail}>{agent.email}</span>

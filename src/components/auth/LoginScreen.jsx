@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import logo from '../../assets/logo-color.png';
 import { authService, supabase } from '../../lib/supabase';
+import { useAuth } from '../../context/AuthContext';
 import { getCountries, getStates, getCities } from '../../data/locationData';
 import { api } from '../../services/api';
 import { agencyService } from '../../services/agencyService';
@@ -33,6 +34,8 @@ import { agencyService } from '../../services/agencyService';
 const REGISTRATION_ENABLED = true;
 
 export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 'login' }) {
+  const { signIn: authSignIn, authError, clearAuthError } = useAuth();
+
   // Modo activo: 'login' | 'register' | 'forgot'
   const [activeMode, setActiveMode] = useState(
     !REGISTRATION_ENABLED && initialMode === 'register' ? 'login' : initialMode
@@ -93,6 +96,12 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
   const [infoMessage, setInfoMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
+  useEffect(() => {
+    if (authError) {
+      setError(authError);
+    }
+  }, [authError]);
+
   // Temporizador para reenvío de código de confirmación de registro
   useEffect(() => {
     if (signupResendCooldown <= 0) return;
@@ -102,11 +111,12 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
     return () => clearInterval(timer);
   }, [signupResendCooldown]);
 
-  // INICIO DE SESIÓN REAL CON SUPABASE
+  // INICIO DE SESIÓN REAL CON SUPABASE + VALIDACIÓN DE PERFIL / CUPO DE PLAN
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setInfoMessage('');
+    clearAuthError?.();
 
     const email = loginEmail.trim();
     const password = loginPassword;
@@ -121,13 +131,17 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
     }
 
     setIsLoading(true);
-    const result = await authService.signIn(email, password);
-    setIsLoading(false);
+    let result;
+    try {
+      result = await authSignIn(email, password);
+    } finally {
+      setIsLoading(false);
+    }
 
-    // Si fallan las credenciales, BLOQUEA y muestra el error
-    if (!result.success) {
-      console.warn('Login fallido:', result.error);
-      const isUnconfirmed = result.error && (
+    // Si fallan las credenciales o la cuenta está restringida por plan / eliminada, BLOQUEA y muestra el error
+    if (!result?.success) {
+      console.warn('Login bloqueado:', result?.code || result?.error);
+      const isUnconfirmed = result?.error && (
         result.error.toLowerCase().includes('not confirmed') ||
         result.error.toLowerCase().includes('no fue confirmado')
       );
@@ -141,66 +155,37 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
         authService.resendSignupOtp(email).catch(console.warn);
         return;
       }
-      setError(result.error || 'Credenciales incorrectas. Verificá tu correo y contraseña.');
+      setError(result?.error || 'Credenciales incorrectas. Verificá tu correo y contraseña.');
       return;
     }
 
-    const sessionUser = result.data?.user;
-    if (!sessionUser) {
+    const verifiedUser = result.user || result.data?.user;
+    if (!verifiedUser) {
       setError('No se pudo verificar la sesión de usuario.');
       return;
     }
 
-    // Verificar si el usuario fue eliminado o es un agente restringido
-    try {
-      const profileRes = await api.get('/api/users/profile', { timeout: 4000 });
-      if (profileRes?.code === 'ACCOUNT_DELETED' || (profileRes?.status === 403 && profileRes?.code === 'ACCOUNT_DELETED')) {
-        await authService.signOut();
-        setError('Esta cuenta ha sido eliminada permanentemente.');
-        return;
-      }
-      if (profileRes?.code === 'AGENT_PLAN_RESTRICTED' || (profileRes?.status === 403 && profileRes?.code === 'AGENT_PLAN_RESTRICTED')) {
-        await authService.signOut();
-        setError(profileRes.message || 'El acceso para inspectores se encuentra suspendido para esta inmobiliaria. Contactá al administrador de tu organización.');
-        return;
-      }
-    } catch (e) {
-      console.warn('Aviso verificando perfil en login:', e);
-    }
-
-    // Buscar nombre y datos en la tabla users de Supabase si existe
-    let dbUser = null;
-    try {
-      const { data } = await supabase
-        .from('users')
-        .select('name, type, inmobiliaria_id, country, state, city, deleted')
-        .eq('id', sessionUser.id)
-        .maybeSingle();
-      if (data) {
-        dbUser = data;
-      }
-    } catch (err) {
-      console.warn('No se pudo obtener datos de tabla users:', err);
-    }
-
-    // Bloquear acceso inmediato si la cuenta está eliminada
-    if (dbUser && (dbUser.deleted === true || dbUser.name === 'Usuario Eliminado' || (typeof dbUser.email === 'string' && dbUser.email.startsWith('deleted_')))) {
+    if (
+      verifiedUser.deleted === true ||
+      verifiedUser.name === 'Usuario Eliminado' ||
+      (typeof verifiedUser.email === 'string' && verifiedUser.email.startsWith('deleted_'))
+    ) {
       await authService.signOut();
       setError('Esta cuenta ha sido eliminada permanentemente.');
       return;
     }
 
-    // Solo si Supabase autorizó con éxito, ingresa a la app
+    // Solo si Supabase + Backend autorizaron con éxito, ingresa a la app
     onLogin({
-      id: sessionUser.id,
-      email: sessionUser.email || email,
-      name: dbUser?.name || sessionUser.user_metadata?.name || sessionUser.email?.split('@')[0] || 'Usuario',
-      role: dbUser?.type || sessionUser.user_metadata?.role || sessionUser.user_metadata?.type || 'owner',
-      type: dbUser?.type || sessionUser.user_metadata?.type || sessionUser.user_metadata?.role || 'owner',
-      inmobiliaria_id: dbUser?.inmobiliaria_id || null,
-      country: dbUser?.country || sessionUser.user_metadata?.country || 'Uruguay',
-      state: dbUser?.state || sessionUser.user_metadata?.state || '',
-      city: dbUser?.city || sessionUser.user_metadata?.city || 'Montevideo',
+      id: verifiedUser.id,
+      email: verifiedUser.email || email,
+      name: verifiedUser.name || verifiedUser.user_metadata?.name || email.split('@')[0] || 'Usuario',
+      role: verifiedUser.role || verifiedUser.type || verifiedUser.user_metadata?.role || verifiedUser.user_metadata?.type || 'owner',
+      type: verifiedUser.type || verifiedUser.role || verifiedUser.user_metadata?.type || verifiedUser.user_metadata?.role || 'owner',
+      inmobiliaria_id: verifiedUser.inmobiliaria_id || null,
+      country: verifiedUser.country || verifiedUser.user_metadata?.country || 'Uruguay',
+      state: verifiedUser.state || verifiedUser.user_metadata?.state || '',
+      city: verifiedUser.city || verifiedUser.user_metadata?.city || 'Montevideo',
     });
   };
 
@@ -369,16 +354,20 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
       }
 
       // Iniciar sesión automáticamente
-      const loginRes = await authService.signIn(validatedInvite.email, password);
-      if (!loginRes.success) {
+      const loginRes = await authSignIn(validatedInvite.email, password);
+      if (!loginRes?.success) {
         setIsLoading(false);
         setActiveMode('login');
         setLoginEmail(validatedInvite.email);
-        setInfoMessage('¡Cuenta creada con éxito! Por favor iniciá sesión.');
+        if (loginRes?.code === 'AGENT_PLAN_RESTRICTED') {
+          setError(loginRes.error || 'Tu cuenta fue creada, pero la inmobiliaria superó el cupo de su plan actual.');
+        } else {
+          setInfoMessage('¡Cuenta creada con éxito! Por favor iniciá sesión.');
+        }
         return;
       }
 
-      const sessionUser = loginRes.data?.user;
+      const sessionUser = loginRes.user || loginRes.data?.user;
       setIsLoading(false);
 
       // Ingresar directamente a la app como agente

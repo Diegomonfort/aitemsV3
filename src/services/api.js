@@ -73,9 +73,10 @@ async function request(endpoint, options = {}) {
 
   try {
     let res = await fetch(url, config);
+    let data = await res.json().catch(() => null);
 
-    // Si el backend responde 401 o 403, intentar refresh forzado y reintentar 1 vez
-    if (res.status === 401 || res.status === 403) {
+    // Si el backend responde 401 (o 403 por token expirado, sin código de negocio), intentar refresh forzado y reintentar 1 vez
+    if (res.status === 401 || (res.status === 403 && !data?.code)) {
       console.warn(`[API] Solicitud a ${endpoint} respondió ${res.status}. Forzando refresh de token...`);
       try {
         const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
@@ -86,13 +87,18 @@ async function request(endpoint, options = {}) {
             Authorization: `Bearer ${freshToken}`,
           };
           res = await fetch(url, { ...config, headers: retryHeaders });
+          data = await res.json().catch(() => null);
         }
       } catch (e) {
         console.warn('[API] Falló reintento con token renovado:', e);
       }
     }
 
-    const data = await res.json().catch(() => null);
+    if (res.status === 403 && (data?.code === 'AGENT_PLAN_RESTRICTED' || data?.code === 'ACCOUNT_DELETED')) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('aitems:auth-restricted', { detail: data }));
+      }
+    }
 
     if (!res.ok) {
       const errorMsg = data?.message || data?.error || `Error HTTP ${res.status}`;

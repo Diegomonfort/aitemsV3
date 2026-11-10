@@ -540,9 +540,10 @@ export default function App() {
     if (!authLoading) {
       if (authUser) {
         setCurrentUser(authUser);
-        setUserRole(authUser.role || authUser.type || 'owner');
+        const role = authUser.role || authUser.type || 'owner';
+        setUserRole(role);
 
-        const isOwner = authUser.type === 'owner' || authUser.role === 'owner' || !authUser.type;
+        const isOwner = role === 'owner';
         const needsAgency = isOwner && !authUser.inmobiliaria_id && !authAgency?.id;
 
         if (needsAgency) {
@@ -559,12 +560,12 @@ export default function App() {
           }
         }
       } else {
-        if (authView !== 'login') {
+        if (authView !== 'login' && authView !== 'verify-email') {
           setAuthView('login');
         }
       }
     }
-  }, [authUser, authAgency, authLoading]);
+  }, [authUser, authAgency, authLoading, authView]);
 
   // Sincronizar datos de la inmobiliaria
   useEffect(() => {
@@ -749,7 +750,10 @@ export default function App() {
             renewalDate: renewalFormatted,
             propertiesUsed: inmo.stats?.totalProperties ?? planData.propertiesCount ?? 0,
             propertiesLimit: planData.propertiesMax || 10,
+            blockedProperties: planData.blockedProperties ?? inmo.stats?.blockedProperties ?? 0,
+            agentsUsed: planData.agentsCount ?? inmo.stats?.totalAgents ?? 1,
             agentsLimit: planData.agentsMax || 1,
+            inactiveAgents: planData.inactiveAgents ?? 0,
           });
         }
       }
@@ -802,9 +806,10 @@ export default function App() {
 
   const handleLogin = (userData) => {
     setCurrentUser(userData);
-    setUserRole(userData.role || userData.type || 'owner');
+    const role = userData.role || userData.type || 'owner';
+    setUserRole(role);
 
-    const isOwner = userData.role === 'owner' || userData.type === 'owner' || !userData.role;
+    const isOwner = role === 'owner';
     const needsAgency = isOwner && !userData.inmobiliaria_id && !authAgency?.id;
 
     if (needsAgency) {
