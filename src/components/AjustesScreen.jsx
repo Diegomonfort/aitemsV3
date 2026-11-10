@@ -52,7 +52,9 @@ export default function AjustesScreen({
   agentsCount = 0,
   onUpdateUser,
   onBack,
-  onLogout
+  onLogout,
+  pendingInvitationsCount = 0,
+  onOpenInvitations
 }) {
   // Modals state
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
@@ -246,6 +248,32 @@ export default function AjustesScreen({
             </span>
           </div>
         </section>
+
+        {/* ============ INVITACIONES PENDIENTES (otra inmobiliaria invitó a esta cuenta) ============ */}
+        {pendingInvitationsCount > 0 && (
+          <>
+            <div style={styles.sectionHeader}>
+              <span style={styles.sectionTitle}>INVITACIONES</span>
+            </div>
+            <div style={styles.groupedCard}>
+              <button
+                type="button"
+                style={styles.groupItem}
+                onClick={() => onOpenInvitations?.()}
+              >
+                <div style={styles.groupItemLeft}>
+                  <Mail size={20} color="#3b82f6" strokeWidth={2} />
+                  <span style={styles.groupItemText}>
+                    {pendingInvitationsCount === 1
+                      ? 'Tenés una invitación pendiente'
+                      : `Tenés ${pendingInvitationsCount} invitaciones pendientes`}
+                  </span>
+                </div>
+                <ChevronRight size={18} color="#94a3b8" />
+              </button>
+            </div>
+          </>
+        )}
 
         {/* ============ SECCIÓN CONFIGURACIÓN ============ */}
         <div style={styles.sectionHeader}>

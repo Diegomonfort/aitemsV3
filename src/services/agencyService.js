@@ -23,10 +23,38 @@ export const agencyService = {
   },
 
   /**
-   * Crea una nueva invitación para un inspector/agente por email
+   * Crea una nueva invitación para un inspector/agente por email.
+   * Si el email ya tiene cuenta, el backend responde EMAIL_HAS_ACCOUNT y hay que reenviar con
+   * confirmExisting=true para dejarle una invitación in-app (sin email).
    */
-  async createInvitation(email, role = 'agent', name = '') {
-    return await api.post('/api/inmobiliarias/invitations', { email, role, name });
+  async createInvitation(email, role = 'agent', name = '', confirmExisting = false) {
+    return await api.post('/api/inmobiliarias/invitations', {
+      email,
+      role,
+      name,
+      ...(confirmExisting ? { confirm_existing: true } : {}),
+    });
+  },
+
+  /**
+   * Invitaciones in-app pendientes dirigidas al usuario autenticado
+   */
+  async getMyInvitations() {
+    return await api.get('/api/inmobiliarias/my-invitations');
+  },
+
+  /**
+   * Acepta una invitación in-app: pasa a ser inspector de esa inmobiliaria
+   */
+  async acceptMyInvitation(invitationId) {
+    return await api.post(`/api/inmobiliarias/my-invitations/${invitationId}/accept`);
+  },
+
+  /**
+   * Rechaza una invitación in-app
+   */
+  async rejectMyInvitation(invitationId) {
+    return await api.post(`/api/inmobiliarias/my-invitations/${invitationId}/reject`);
   },
 
   /**

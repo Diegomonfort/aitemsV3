@@ -1,51 +1,17 @@
 import React, { useState } from 'react';
-import { Building2, Globe, MapPin, Camera, X, ArrowRight, AlertCircle, Loader2, ChevronDown, LogOut } from 'lucide-react';
+import { Building2, Camera, X, ArrowRight, AlertCircle, Loader2, LogOut } from 'lucide-react';
 import logo from '../../assets/logo-color.png';
 import { agencyService } from '../../services/agencyService';
-import { getCountries, getStates, getCities } from '../../data/locationData';
 
+// Alta simplificada de la inmobiliaria: solo nombre (obligatorio) y logo (opcional).
+// Ubicación y sitio web se pueden completar después desde Ajustes; si el registro trajo
+// país/departamento/ciudad se envían tal cual, y si no el backend aplica sus valores por defecto.
 export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobiliaria, onLogout }) {
-  const initialCountry = initialData?.country || 'Uruguay';
-  const initialStates = getStates(initialCountry);
-  const initialState = initialData?.state && initialStates.includes(initialData.state)
-    ? initialData.state
-    : (initialStates[0] || '');
-  const initialCities = getCities(initialCountry, initialState);
-  const initialCity = initialData?.city && initialCities.includes(initialData.city)
-    ? initialData.city
-    : (initialCities[0] || '');
-
   const [agencyName, setAgencyName] = useState(initialData?.agencyName || '');
-  const [website, setWebsite] = useState(initialData?.website || '');
-  const [country, setCountry] = useState(initialCountry);
-  const [availableStates, setAvailableStates] = useState(initialStates);
-  const [state, setState] = useState(initialState);
-  const [availableCities, setAvailableCities] = useState(initialCities);
-  const [city, setCity] = useState(initialCity);
   const [logoPreview, setLogoPreview] = useState(null);
 
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
-  const handleCountryChange = (e) => {
-    const newCountry = e.target.value;
-    setCountry(newCountry);
-    const states = getStates(newCountry);
-    setAvailableStates(states);
-    const firstState = states[0] || '';
-    setState(firstState);
-    const cities = getCities(newCountry, firstState);
-    setAvailableCities(cities);
-    setCity(cities[0] || '');
-  };
-
-  const handleStateChange = (e) => {
-    const newState = e.target.value;
-    setState(newState);
-    const cities = getCities(country, newState);
-    setAvailableCities(cities);
-    setCity(cities[0] || '');
-  };
 
   const handleLogoFile = (e) => {
     const file = e.target.files?.[0];
@@ -78,47 +44,32 @@ export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobi
       return;
     }
 
-    if (!country) {
-      setError('Por favor seleccioná el país.');
-      return;
-    }
-
-    if (!state) {
-      setError('Por favor seleccioná el departamento o provincia.');
-      return;
-    }
-
-    if (!city || !city.trim()) {
-      setError('Por favor seleccioná la ciudad.');
-      return;
-    }
+    const country = initialData?.country || undefined;
+    const state = initialData?.state || undefined;
+    const city = initialData?.city?.trim() || undefined;
 
     setIsLoading(true);
     try {
-      const locationText = [city.trim(), state, country].filter(Boolean).join(', ');
-      const formattedWebsite = website.trim() 
-        ? (website.startsWith('http') ? website : `https://${website.replace(/^https?:\/\//, '')}`) 
-        : '';
-
       const res = await agencyService.createAgency({
         name: trimmedName,
         country,
         state,
-        city: city.trim(),
-        website_url: formattedWebsite,
+        city,
         logo: logoPreview,
       });
 
       if (res?.success && res.inmobiliaria) {
+        const created = res.inmobiliaria;
+        const locationText = [created.city, created.state, created.country].filter(Boolean).join(', ');
         onCompleteInmobiliaria({
-          id: res.inmobiliaria.id,
-          name: res.inmobiliaria.name,
+          id: created.id,
+          name: created.name,
           location: locationText,
-          website: formattedWebsite,
-          logo: logoPreview,
-          country,
-          state,
-          city: city.trim(),
+          website: created.website_url || '',
+          logo: created.logo || logoPreview,
+          country: created.country,
+          state: created.state,
+          city: created.city,
         });
       } else {
         setError(res?.message || 'No se pudo crear la inmobiliaria.');
@@ -168,7 +119,7 @@ export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobi
 
           <h1 style={styles.title}>Tu Inmobiliaria</h1>
           <p style={styles.subtitle}>
-            Configurá los datos oficiales de tu empresa para identificar tus relevamientos e informes PDF
+            Poné el nombre y el logo de tu inmobiliaria para identificar tus relevamientos e informes PDF
           </p>
         </div>
 
@@ -228,88 +179,6 @@ export default function CreateInmobiliariaScreen({ initialData, onCompleteInmobi
                 style={styles.groupedInput}
                 required
                 autoFocus
-              />
-            </div>
-
-            <div style={styles.groupedDivider} />
-
-            {/* Fila 2: País */}
-            <div style={styles.groupedRow}>
-              <Globe size={18} color="#94a3b8" style={styles.groupedIcon} />
-              <select
-                value={country}
-                onChange={handleCountryChange}
-                style={styles.mobileSelect}
-                required
-              >
-                {getCountries().map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-              <ChevronDown size={16} color="#94a3b8" style={{ marginRight: 6, pointerEvents: 'none', flexShrink: 0 }} />
-            </div>
-
-            <div style={styles.groupedDivider} />
-
-            {/* Fila 3: Departamento / Provincia */}
-            <div style={styles.groupedRow}>
-              <MapPin size={18} color="#94a3b8" style={styles.groupedIcon} />
-              <select
-                value={state}
-                onChange={handleStateChange}
-                style={styles.mobileSelect}
-                required
-              >
-                {availableStates.map((st) => (
-                  <option key={st} value={st}>{st}</option>
-                ))}
-              </select>
-              <ChevronDown size={16} color="#94a3b8" style={{ marginRight: 6, pointerEvents: 'none', flexShrink: 0 }} />
-            </div>
-
-            <div style={styles.groupedDivider} />
-
-            {/* Fila 4: Ciudad */}
-            <div style={styles.groupedRow}>
-              <MapPin size={18} color="#94a3b8" style={styles.groupedIcon} />
-              {availableCities.length > 0 ? (
-                <>
-                  <select
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    style={styles.mobileSelect}
-                    required
-                  >
-                    {availableCities.map((ct) => (
-                      <option key={ct} value={ct}>{ct}</option>
-                    ))}
-                  </select>
-                  <ChevronDown size={16} color="#94a3b8" style={{ marginRight: 6, pointerEvents: 'none', flexShrink: 0 }} />
-                </>
-              ) : (
-                <input
-                  type="text"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  placeholder="Ciudad o localidad *"
-                  style={styles.groupedInput}
-                  required
-                />
-              )}
-            </div>
-
-            <div style={styles.groupedDivider} />
-
-            {/* Fila 5: Sitio Web (Opcional) */}
-            <div style={styles.groupedRow}>
-              <Globe size={18} color="#94a3b8" style={styles.groupedIcon} />
-              <input
-                type="text"
-                value={website}
-                onChange={(e) => setWebsite(e.target.value)}
-                placeholder="Sitio web o Instagram (opcional)"
-                style={styles.groupedInput}
-                autoCapitalize="none"
               />
             </div>
           </div>

@@ -25,11 +25,12 @@ import { getCountries, getStates, getCities } from '../../data/locationData';
 import { api } from '../../services/api';
 import { agencyService } from '../../services/agencyService';
 
-// Por ahora el alta de cuentas se hace solo desde la web (PC): las inmobiliarias se registran ahí
-// y crean el acceso de sus inspectores con contraseña temporal. En la app solo se inicia sesión.
-// Poner en true para volver a mostrar "Crear cuenta" en la app.
-const REGISTRATION_ENABLED = false;
-const WEB_REGISTER_URL = 'aitemsapp.com';
+// Registro de titulares habilitado en la app (igual que en desktop): nombre, email y contraseña,
+// verificación por código y luego se crea la inmobiliaria (solo nombre y logo).
+// Los inspectores no se registran: reciben su acceso (email + contraseña temporal) de la inmobiliaria.
+// IMPORTANTE (App Store): no mencionar ni linkear el registro web, planes ni precios desde la app (anti-steering de Apple).
+// Poner en false para ocultar "Crear cuenta" en la app.
+const REGISTRATION_ENABLED = true;
 
 export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 'login' }) {
   // Modo activo: 'login' | 'register' | 'forgot'
@@ -760,6 +761,8 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
               <h1 style={styles.title}>
                 {activeMode === 'login'
                   ? 'Bienvenido a Aitems'
+                  : activeMode === 'register'
+                  ? 'Crear cuenta'
                   : forgotStep === 'request'
                   ? 'Recuperar contraseña'
                   : forgotStep === 'verify'
@@ -771,6 +774,8 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
               <p style={styles.subtitle}>
                 {activeMode === 'login'
                   ? 'Iniciá sesión para gestionar tus propiedades e inventarios'
+                  : activeMode === 'register'
+                  ? 'Registrate para empezar a gestionar tus propiedades e inventarios'
                   : forgotStep === 'request'
                   ? 'Ingresá tu correo para recibir un código de recuperación'
                   : forgotStep === 'verify'
@@ -891,77 +896,12 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
                   <span>{isLoading ? 'Ingresando...' : 'Ingresar'}</span>
                   {!isLoading && <ArrowRight size={17} color="#ffffff" strokeWidth={2.4} />}
                 </button>
-
-                {!REGISTRATION_ENABLED && (
-                  <div style={styles.noAccountNote}>
-                    <p style={{ margin: 0 }}>
-                      <strong>¿Sos inspector?</strong> Pedile a tu inmobiliaria tu acceso: te van a pasar tu email y una contraseña temporal.
-                    </p>
-                    <p style={{ margin: '8px 0 0 0' }}>
-                      <strong>¿Querés registrar tu inmobiliaria?</strong> Hacelo desde una computadora en <strong>{WEB_REGISTER_URL}</strong>.
-                    </p>
-                  </div>
-                )}
               </form>
             )}
 
             {/* ============ FORMULARIO REGISTRO ============ */}
-            {/* Oculto temporalmente para Apple Guideline 3.1.1 B2B Companion App */}
-            {false && activeMode === 'register' && (
+            {REGISTRATION_ENABLED && activeMode === 'register' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                {/* Selector secundario: Titular vs Invitado */}
-                <div style={{
-                  display: 'flex',
-                  backgroundColor: '#f1f5f9',
-                  borderRadius: '12px',
-                  padding: '3px',
-                  gap: '4px',
-                }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRegType('owner');
-                      setError('');
-                    }}
-                    style={{
-                      flex: 1,
-                      height: '36px',
-                      borderRadius: '9px',
-                      border: 'none',
-                      backgroundColor: regType === 'owner' ? '#ffffff' : 'transparent',
-                      color: regType === 'owner' ? '#0f172a' : '#64748b',
-                      fontWeight: regType === 'owner' ? '700' : '600',
-                      fontSize: '12.5px',
-                      cursor: 'pointer',
-                      boxShadow: regType === 'owner' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
-                    Soy Titular
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRegType('invited');
-                      setError('');
-                    }}
-                    style={{
-                      flex: 1,
-                      height: '36px',
-                      borderRadius: '9px',
-                      border: 'none',
-                      backgroundColor: regType === 'invited' ? '#ffffff' : 'transparent',
-                      color: regType === 'invited' ? '#0f172a' : '#64748b',
-                      fontWeight: regType === 'invited' ? '700' : '600',
-                      fontSize: '12.5px',
-                      cursor: 'pointer',
-                      boxShadow: regType === 'invited' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
-                    Tengo Invitación
-                  </button>
-                </div>
 
                 {/* FLUJO 1: TITULAR (CREACIÓN DE INMOBILIARIA) */}
                 {regType === 'owner' && (
@@ -1054,7 +994,7 @@ export default function LoginScreen({ onLogin, onRegisterSuccess, initialMode = 
                       }}
                     >
                       <UserPlus size={18} color="#ffffff" strokeWidth={2.4} />
-                      <span>{isLoading ? 'Registrando...' : 'Registrarme como Administrador'}</span>
+                      <span>{isLoading ? 'Creando cuenta...' : 'Crear cuenta'}</span>
                     </button>
                   </form>
                 )}

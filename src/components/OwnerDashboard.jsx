@@ -62,6 +62,8 @@ export default function OwnerDashboard({
   const [inviteEmail, setInviteEmail] = useState('');
   const [isSubmittingInvite, setIsSubmittingInvite] = useState(false);
   const [inviteError, setInviteError] = useState('');
+  // Aviso cuando el email ya tiene cuenta (otra inmobiliaria): el owner confirma y queda invitación in-app
+  const [existingAccountWarning, setExistingAccountWarning] = useState('');
   const [inviteName, setInviteName] = useState('');
   // Credenciales del inspector recién creado: { email, temporaryPassword }
   const [createdCredentials, setCreatedCredentials] = useState(null);
@@ -189,7 +191,22 @@ export default function OwnerDashboard({
     setInviteError('');
 
     try {
-      const res = await agencyService.createInvitation(cleanEmail, 'agent', inviteName.trim());
+      const confirmExisting = Boolean(existingAccountWarning);
+      const res = await agencyService.createInvitation(cleanEmail, 'agent', inviteName.trim(), confirmExisting);
+
+      // El email ya tiene cuenta: mostrar "Atención" y pedir confirmación para enviar la invitación
+      if (res && res.code === 'EMAIL_HAS_ACCOUNT' && !confirmExisting) {
+        setExistingAccountWarning(res.message || 'Atención: este correo ya tiene una cuenta en otra inmobiliaria.');
+        return;
+      }
+
+      // Invitación in-app enviada a una cuenta existente (sin email ni credenciales)
+      if (res && res.success && res.existingAccount) {
+        toast.success('Invitación enviada. La verá al iniciar sesión.');
+        handleCloseInviteModal();
+        return;
+      }
+
       if (res && res.success && res.credentials) {
         toast.success(`Inspector ${cleanEmail} creado`);
         setCreatedCredentials(res.credentials);
@@ -240,6 +257,7 @@ export default function OwnerDashboard({
     setInviteEmail('');
     setInviteName('');
     setInviteError('');
+    setExistingAccountWarning('');
     setCreatedCredentials(null);
     setCopiedField('');
     setIsSubmittingInvite(false);
@@ -841,6 +859,24 @@ export default function OwnerDashboard({
                 </div>
               )}
 
+              {existingAccountWarning && !inviteError && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '8px',
+                  backgroundColor: '#fffbeb',
+                  border: '1px solid #fde68a',
+                  borderRadius: '12px',
+                  padding: '10px 12px',
+                  color: '#92400e',
+                  fontSize: '12.5px',
+                  lineHeight: 1.45,
+                }}>
+                  <AlertCircle size={15} color="#d97706" style={{ flexShrink: 0, marginTop: 1 }} />
+                  <span>{existingAccountWarning}</span>
+                </div>
+              )}
+
               <div style={styles.inputStack}>
                 <label style={styles.label}>
                   Correo electrónico del inspector <span style={{ color: '#ef4444' }}>*</span>
@@ -851,6 +887,7 @@ export default function OwnerDashboard({
                   onChange={(e) => {
                     setInviteEmail(e.target.value);
                     if (inviteError) setInviteError('');
+                    if (existingAccountWarning) setExistingAccountWarning('');
                   }}
                   placeholder="ejemplo@inmobiliaria.com"
                   style={styles.inputField}
@@ -871,7 +908,9 @@ export default function OwnerDashboard({
                   disabled={isSubmittingInvite}
                 />
                 <span style={styles.formHint}>
-                  Creamos la cuenta con una contraseña temporal. El inspector solo inicia sesión en la app y elige su propia contraseña.
+                  {existingAccountWarning
+                    ? 'No se envía ningún email: la invitación le aparece en su cuenta para aceptarla o rechazarla.'
+                    : 'Creamos la cuenta con una contraseña temporal. El inspector solo inicia sesión en la app y elige su propia contraseña.'}
                 </span>
               </div>
 
@@ -888,12 +927,12 @@ export default function OwnerDashboard({
                   {isSubmittingInvite ? (
                     <>
                       <Loader2 size={15} color="#ffffff" style={{ animation: 'spin 1s linear infinite' }} />
-                      <span>Creando inspector...</span>
+                      <span>{existingAccountWarning ? 'Enviando invitación...' : 'Creando inspector...'}</span>
                     </>
                   ) : (
                     <>
                       <UserPlus size={15} strokeWidth={2.4} />
-                      <span>Crear inspector</span>
+                      <span>{existingAccountWarning ? 'Enviar invitación' : 'Crear inspector'}</span>
                     </>
                   )}
                 </button>
@@ -960,8 +999,8 @@ export default function OwnerDashboard({
               </div>
               <div style={styles.managePlanStatDivider} />
               <div style={styles.managePlanStatItem}>
-                <span style={styles.managePlanStatVal}>{plan?.renewalDate || 'Activo'}</span>
-                <span style={styles.managePlanStatKey}>Estado</span>
+                <span style={styles.managePlanStatVal}>{plan?.renewalDate || 'Sin vencimiento'}</span>
+                <span style={styles.managePlanStatKey}>Renovación</span>
               </div>
             </div>
 
@@ -1172,6 +1211,7 @@ const styles = {
     fontSize: '13px',
     fontWeight: '700',
     color: '#ffffff',
+    whiteSpace: 'nowrap',
   },
   planStatKey: {
     fontSize: '11px',
@@ -1661,11 +1701,14 @@ const styles = {
     alignItems: 'center',
     gap: '2px',
     flex: 1,
+    minWidth: 0,
   },
   managePlanStatVal: {
     fontSize: '14px',
     fontWeight: '800',
     color: '#0f172a',
+    whiteSpace: 'nowrap',
+    textAlign: 'center',
   },
   managePlanStatKey: {
     fontSize: '10.5px',

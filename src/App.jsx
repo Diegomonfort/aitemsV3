@@ -86,6 +86,7 @@ import { api } from './services/api';
 import { photoService } from './services/photoService';
 import { isNativePlatform, takeMultiplePhotos, pickFromGallery } from './utils/nativeCamera';
 import CameraCapture from './components/CameraCapture';
+import PendingInvitationSheet from './components/PendingInvitationSheet';
 import { useToast } from './context/ToastContext';
 
 const getPropRoomsCount = (prop) => {
@@ -734,9 +735,9 @@ export default function App() {
               if (!isNaN(d.getTime())) {
                 renewalFormatted = d.toLocaleDateString('es-ES', {
                   day: 'numeric',
-                  month: 'long',
+                  month: 'short',
                   year: 'numeric',
-                });
+                }).replace('.', '');
               }
             } catch (e) {
               renewalFormatted = planData.endsAt;
@@ -863,8 +864,119 @@ export default function App() {
     setAuthView('app');
   };
 
+  // ─── Invitaciones in-app (otra inmobiliaria invitó a esta cuenta como inspector) ───
+  const [myInvitations, setMyInvitations] = useState([]);
+  const [isInvitationSheetOpen, setIsInvitationSheetOpen] = useState(false);
+  const INVITES_LATER_KEY = 'aitems_invites_later';
+
+  const getDismissedInviteIds = () => {
+    try {
+      return JSON.parse(sessionStorage.getItem(INVITES_LATER_KEY) || '[]').map(String);
+    } catch (e) {
+      return [];
+    }
+  };
+
+  const loadMyInvitations = useCallback(async ({ autoOpen = false } = {}) => {
+    try {
+      const res = await agencyService.getMyInvitations();
+      const list = res?.success && Array.isArray(res.invitations) ? res.invitations : [];
+      setMyInvitations(list);
+      if (autoOpen && list.length > 0) {
+        const dismissed = getDismissedInviteIds();
+        if (list.some((inv) => !dismissed.includes(String(inv.id)))) {
+          setIsInvitationSheetOpen(true);
+        }
+      }
+      if (list.length === 0) setIsInvitationSheetOpen(false);
+      return list;
+    } catch (e) {
+      console.warn('Aviso consultando invitaciones pendientes:', e);
+      return [];
+    }
+  }, []);
+
+  // Consultar al iniciar sesión (también en la pantalla de crear inmobiliaria: caso típico de quien recién se registró)
+  useEffect(() => {
+    if (!authLoading && isAuthenticated && authUser?.id && (authView === 'app' || authView === 'create-inmobiliaria')) {
+      loadMyInvitations({ autoOpen: true });
+    }
+  }, [authLoading, isAuthenticated, authUser?.id, authView, loadMyInvitations]);
+
+  const handleInvitationLater = () => {
+    try {
+      const ids = new Set([...getDismissedInviteIds(), ...myInvitations.map((inv) => String(inv.id))]);
+      sessionStorage.setItem(INVITES_LATER_KEY, JSON.stringify([...ids]));
+    } catch (e) {}
+    setIsInvitationSheetOpen(false);
+  };
+
+  const handleAcceptInvitation = async (invitation) => {
+    const res = await agencyService.acceptMyInvitation(invitation.id);
+    if (!res?.success) {
+      return { success: false, message: res?.message || res?.error || 'No se pudo aceptar la invitación.' };
+    }
+    setIsInvitationSheetOpen(false);
+    setMyInvitations([]);
+    toast.success(res.message || `Ahora sos inspector de ${invitation.inmobiliaria_name}`);
+
+    const newInmo = res.inmobiliaria;
+    if (newInmo?.id) {
+      setAgency(prev => ({
+        ...prev,
+        id: newInmo.id,
+        name: newInmo.name || prev.name,
+        logo: newInmo.logo || null,
+        website: newInmo.website_url || '',
+        country: newInmo.country || prev.country,
+        state: newInmo.state || '',
+        city: newInmo.city || '',
+        location: [newInmo.city, newInmo.state, newInmo.country].filter(Boolean).join(', '),
+      }));
+    }
+    setCurrentUser(prev => ({ ...prev, role: 'agent', type: 'agent', inmobiliaria_id: newInmo?.id || prev.inmobiliaria_id }));
+    setUserRole('agent');
+    try {
+      await refreshProfile?.();
+    } catch (e) {
+      console.warn('Aviso refrescando perfil tras aceptar invitación:', e);
+    }
+    setSelectedPropertyDetail(null);
+    setSelectedRoomDetail(null);
+    setActiveTab('home');
+    setAuthView('app');
+    loadProperties();
+    loadColleagues();
+    loadAgencyInfo();
+    return { success: true };
+  };
+
+  const handleRejectInvitation = async (invitation) => {
+    const res = await agencyService.rejectMyInvitation(invitation.id);
+    if (!res?.success) {
+      return { success: false, message: res?.message || res?.error || 'No se pudo rechazar la invitación.' };
+    }
+    toast.success('Invitación rechazada');
+    const remaining = myInvitations.filter((inv) => String(inv.id) !== String(invitation.id));
+    setMyInvitations(remaining);
+    if (remaining.length === 0) setIsInvitationSheetOpen(false);
+    return { success: true };
+  };
+
+  const invitationSheet = (
+    <PendingInvitationSheet
+      isOpen={isInvitationSheetOpen && myInvitations.length > 0}
+      invitations={myInvitations}
+      onAccept={handleAcceptInvitation}
+      onReject={handleRejectInvitation}
+      onLater={handleInvitationLater}
+    />
+  );
+
   const handleLogout = async () => {
     setIsMenuOpen(false);
+    setMyInvitations([]);
+    setIsInvitationSheetOpen(false);
     setProperties([]);
     setRecentProperties([]);
     setPropertiesPagination({
@@ -3603,6 +3715,7 @@ export default function App() {
           onCompleteInmobiliaria={handleCompleteInmobiliaria}
           onLogout={handleLogout}
         />
+        {invitationSheet}
       </div>
     );
   }
@@ -4360,8 +4473,12 @@ export default function App() {
             setActiveTab('home');
           }}
           onLogout={handleLogout}
+          pendingInvitationsCount={myInvitations.length}
+          onOpenInvitations={() => setIsInvitationSheetOpen(true)}
         />
       )}
+
+      {invitationSheet}
 
       {/* ============ VISTA 3: DETALLE DE PROPIEDAD ============ */}
       {activeTab === 'property-detail' && selectedPropertyDetail && (() => {
