@@ -603,7 +603,7 @@ export default function AjustesScreen({
           </div>
 
           <p style={styles.deleteModalDesc}>
-            Al confirmar la eliminación de tu cuenta, se borrarán de forma definitiva tu perfil de usuario, inventarios, planos de planta, reportes y accesos asociados, de acuerdo a las directrices de privacidad de Apple App Store.
+            Al confirmar, se eliminan de forma definitiva tu acceso y tus datos personales (nombre, email y ubicación). Las propiedades e inventarios que cargaste quedan en la inmobiliaria, sin tus datos personales.
           </p>
 
           <div style={styles.deleteVerifyBox}>
