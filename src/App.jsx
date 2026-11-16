@@ -1361,7 +1361,23 @@ export default function App() {
   const [cameraContext, setCameraContext] = useState('items'); // 'items' | 'property' | 'room'
   const [photoDetectedItems, setPhotoDetectedItems] = useState([]);
   const [selectedPhotoReviewId, setSelectedPhotoReviewId] = useState('all');
-  const [photoSourceFilter, setPhotoSourceFilter] = useState('all'); // 'all' | 'room' | 'unassigned' | 'other'
+  const [photoSourceFilter, setPhotoSourceFilter] = useState('all'); // 'all' | 'room' | 'unassigned' | 'other' | 'pending'
+  // Fotos ya analizadas de la propiedad: { [image_id]: { analyzed, items: [...] } }
+  const [photoAnalysisMap, setPhotoAnalysisMap] = useState({});
+  const [viewingAnalyzedPhoto, setViewingAnalyzedPhoto] = useState(null);
+
+  // Cargar qué fotos ya se analizaron al abrir "Agregar ítems por foto"
+  const photoAnalysisPropertyId = selectedPropertyDetail?.id;
+  useEffect(() => {
+    if (!isAddItemModalOpen || itemAddMethod !== 'photo' || !photoAnalysisPropertyId) return;
+    let cancelled = false;
+    photoService.getPhotosAnalysis(photoAnalysisPropertyId).then((res) => {
+      if (!cancelled && res?.success && res.data && typeof res.data === 'object') {
+        setPhotoAnalysisMap(res.data);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [isAddItemModalOpen, itemAddMethod, photoAnalysisPropertyId]);
   const [isPhotoTypeSelectorOpen, setIsPhotoTypeSelectorOpen] = useState(false);
   const [photoAnalyzeType, setPhotoAnalyzeType] = useState('item'); // 'item' | 'structure'
 
@@ -3175,6 +3191,35 @@ export default function App() {
       );
       const categoryId = matchedAmb?.id;
 
+      // Id en la base de cada foto analizada. Las fotos nuevas (cámara/galería) se suben a la propiedad
+      // para poder guardar de qué foto salió cada ítem.
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const savedPhotoByLocalId = {}; // photoItemFiles.id -> { id, url }
+      photoItemFiles.forEach(pf => {
+        const dbId = pf.originalPhoto?.id;
+        if (pf.isExisting && dbId && UUID_RE.test(String(dbId))) {
+          savedPhotoByLocalId[pf.id] = { id: dbId, url: pf.url };
+        }
+      });
+      for (const pf of photoItemFiles.filter(f => !f.isExisting && f.file)) {
+        try {
+          const formData = new FormData();
+          formData.append('photo', pf.file, pf.file.name || 'foto.jpg');
+          formData.append('property_id', selectedPropertyDetail.id);
+          if (authUser?.id) formData.append('user_id', authUser.id);
+          if (categoryId) formData.append('category_id', categoryId);
+          formData.append('room', selectedRoomDetail);
+          formData.append('category', selectedRoomDetail);
+          formData.append('method', 'upload');
+          const upRes = await photoService.uploadPhoto(formData);
+          if (upRes?.success !== false && upRes?.data?.id) {
+            savedPhotoByLocalId[pf.id] = { id: upRes.data.id, url: upRes.data.url || pf.url };
+          }
+        } catch (upErr) {
+          console.warn('No se pudo subir la foto analizada:', upErr);
+        }
+      }
+
       let createdItems = [];
       if (categoryId) {
         const payload = {
@@ -3188,7 +3233,9 @@ export default function App() {
             name: c.name.trim(),
             quantity: c.quantity || 1,
             description: c.description || null,
-            status: c.status || null
+            status: c.status || null,
+            structure: !!c.structure,
+            image_id: savedPhotoByLocalId[c.photoId]?.id || null
           }))
         };
 
@@ -3222,10 +3269,10 @@ export default function App() {
       const newPhotosFormatted = photoItemFiles
         .filter(pf => !pf.isExisting)
         .map((pf) => ({
-          id: pf.id,
+          id: savedPhotoByLocalId[pf.id]?.id || pf.id,
           title: `${selectedRoomDetail} - ${pf.title}`,
           room: selectedRoomDetail,
-          url: pf.url
+          url: savedPhotoByLocalId[pf.id]?.url || pf.url
         }));
 
       const updatedInv = {
@@ -6064,7 +6111,11 @@ export default function App() {
                             const unassignedPhotos = existingPropPhotos.filter(p => !p.room || p.room === 'Sin asignar' || p.room === 'General' || p.room === 'Portada');
                             const otherPhotos = existingPropPhotos.filter(p => p.room && p.room !== selectedRoomDetail && p.room !== 'Sin asignar' && p.room !== 'General' && p.room !== 'Portada');
 
+                            const pendingPhotos = existingPropPhotos.filter(p => !photoAnalysisMap[p.id]);
+                            const analyzedPhotosCount = existingPropPhotos.length - pendingPhotos.length;
+
                             const filteredExistingPhotos = existingPropPhotos.filter(photo => {
+                              if (photoSourceFilter === 'pending') return !photoAnalysisMap[photo.id];
                               if (photoSourceFilter === 'room') return photo.room === selectedRoomDetail;
                               if (photoSourceFilter === 'unassigned') return !photo.room || photo.room === 'Sin asignar' || photo.room === 'General' || photo.room === 'Portada';
                               if (photoSourceFilter === 'other') return photo.room && photo.room !== selectedRoomDetail && photo.room !== 'Sin asignar' && photo.room !== 'General' && photo.room !== 'Portada';
@@ -6144,6 +6195,19 @@ export default function App() {
                                           Todas ({existingPropPhotos.length})
                                         </button>
 
+                                        {analyzedPhotosCount > 0 && pendingPhotos.length > 0 && (
+                                          <button
+                                            type="button"
+                                            style={{
+                                              ...styles.photoFilterChip,
+                                              ...(photoSourceFilter === 'pending' ? styles.photoFilterChipActive : styles.photoFilterChipInactive)
+                                            }}
+                                            onClick={() => setPhotoSourceFilter('pending')}
+                                          >
+                                            Sin analizar ({pendingPhotos.length})
+                                          </button>
+                                        )}
+
                                         {roomPhotos.length > 0 && (
                                           <button
                                             type="button"
@@ -6214,6 +6278,22 @@ export default function App() {
                                               }}>
                                                 {isSelected && <Check size={11} color="#ffffff" strokeWidth={3} />}
                                               </div>
+
+                                              {/* Ya analizada: tocar para ver los ítems que salieron de esta foto */}
+                                              {photoAnalysisMap[photo.id] && (
+                                                <button
+                                                  type="button"
+                                                  style={styles.analyzedPhotoBadge}
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setViewingAnalyzedPhoto(photo);
+                                                  }}
+                                                  aria-label="Ver ítems detectados en esta foto"
+                                                >
+                                                  <Check size={10} color="#ffffff" strokeWidth={3.5} />
+                                                  <span>{photoAnalysisMap[photo.id].items.length} ítems</span>
+                                                </button>
+                                              )}
 
                                               {/* Badge de ambiente */}
                                               <div style={styles.existingPhotoRoomTag}>
@@ -6558,6 +6638,105 @@ export default function App() {
                               </div>
                             </div>
                           )}
+
+                          {/* Ítems que salieron de una foto ya analizada */}
+                          {viewingAnalyzedPhoto && (() => {
+                            const analysis = photoAnalysisMap[viewingAnalyzedPhoto.id] || { items: [] };
+                            const viewingKey = `prop-photo-${viewingAnalyzedPhoto.id}`;
+                            const viewingSelected = photoItemFiles.some(pf => pf.id === viewingKey);
+                            const groups = [
+                              { key: 'item', label: 'Mobiliario y artefactos', items: analysis.items.filter(i => !i.structure) },
+                              { key: 'structure', label: 'Estructura', items: analysis.items.filter(i => i.structure) },
+                            ].filter(g => g.items.length > 0);
+
+                            return (
+                              <BottomSheet
+                                isOpen={!!viewingAnalyzedPhoto}
+                                onClose={() => setViewingAnalyzedPhoto(null)}
+                                title="Foto analizada"
+                                subtitle={`${analysis.items.length} ${analysis.items.length === 1 ? 'ítem' : 'ítems'} en el inventario`}
+                                size="full"
+                                stacked
+                              >
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', paddingBottom: '8px' }}>
+                                  <div style={{ borderRadius: '14px', overflow: 'hidden', backgroundColor: '#0f172a', aspectRatio: '4 / 3' }}>
+                                    <img
+                                      src={viewingAnalyzedPhoto.url}
+                                      alt="Foto analizada"
+                                      style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+                                    />
+                                  </div>
+
+                                  {groups.length === 0 ? (
+                                    <div style={{ padding: '20px 14px', textAlign: 'center', borderRadius: '12px', border: '1px dashed #cbd5e1', color: '#64748b', fontSize: '13px' }}>
+                                      Esta foto se analizó pero no quedó ningún ítem en el inventario (se descartaron o se borraron).
+                                    </div>
+                                  ) : (
+                                    groups.map(g => (
+                                      <div key={g.key} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        {groups.length > 1 && (
+                                          <span style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                            {g.label}
+                                          </span>
+                                        )}
+                                        {g.items.map(it => (
+                                          <div
+                                            key={it.id}
+                                            style={{
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              gap: '10px',
+                                              padding: '10px 12px',
+                                              borderRadius: '12px',
+                                              border: '1px solid #e2e8f0',
+                                              backgroundColor: '#ffffff',
+                                            }}
+                                          >
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                              <div style={{ fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
+                                                {it.name}
+                                                {it.quantity > 1 && <span style={{ color: '#64748b', fontWeight: 600 }}> × {it.quantity}</span>}
+                                              </div>
+                                              {it.details && (
+                                                <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>{it.details}</div>
+                                              )}
+                                            </div>
+                                            {it.status && (
+                                              <span style={{ flexShrink: 0, padding: '3px 9px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, color: '#047857', backgroundColor: '#ecfdf5' }}>
+                                                {it.status}
+                                              </span>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ))
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      handleToggleExistingPhoto(viewingAnalyzedPhoto);
+                                      setViewingAnalyzedPhoto(null);
+                                    }}
+                                    style={{
+                                      marginTop: '4px',
+                                      padding: '13px',
+                                      borderRadius: '12px',
+                                      border: '1px solid #e2e8f0',
+                                      backgroundColor: '#ffffff',
+                                      color: '#0f172a',
+                                      fontSize: '14px',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      fontFamily: 'inherit',
+                                    }}
+                                  >
+                                    {viewingSelected ? 'Quitar de la selección' : 'Seleccionar para analizar de nuevo'}
+                                  </button>
+                                </div>
+                              </BottomSheet>
+                            );
+                          })()}
 
                           {/* Modal Overlay: Selector de tipo de análisis (Mobiliario vs Estructura) */}
                           {isPhotoTypeSelectorOpen && (
@@ -13158,6 +13337,25 @@ const styles = {
     gap: '8px',
     paddingRight: '2px',
     alignContent: 'start',
+  },
+  analyzedPhotoBadge: {
+    position: 'absolute',
+    top: '5px',
+    left: '5px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '3px',
+    padding: '3px 7px 3px 5px',
+    borderRadius: '20px',
+    border: 'none',
+    backgroundColor: '#059669',
+    color: '#ffffff',
+    fontSize: '10px',
+    fontWeight: '700',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    lineHeight: 1.2,
   },
   existingPhotoThumbnailCard: {
     position: 'relative',

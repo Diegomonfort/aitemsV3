@@ -20,6 +20,23 @@ export const photoService = {
   },
 
   /**
+   * Qué fotos de la propiedad ya fueron analizadas y qué ítems salieron de cada una
+   * @param {string} propertyId
+   * @returns data = { [image_id]: { analyzed, items: [{ id, name, quantity, status, details, structure }] } }
+   */
+  async getPhotosAnalysis(propertyId) {
+    return await api.get(`/api/photos/analysis?property_id=${encodeURIComponent(propertyId)}`, { timeout: 30000 });
+  },
+
+  /**
+   * Subir una foto a la propiedad (devuelve data.id y data.url de la foto guardada)
+   * @param {FormData} formData - photo, property_id, room/category_id, method
+   */
+  async uploadPhoto(formData) {
+    return await api.post('/api/photos', formData, { timeout: 60000 });
+  },
+
+  /**
    * Mover fotos a otro ambiente / categoría
    * @param {Object} payload - { ids: string[], room: string, category_id?: string, property_id?: string }
    */
