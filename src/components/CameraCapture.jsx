@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { pickFromGallery } from '../utils/nativeCamera';
 import { openNativeMultiCamera, isMultiCameraAvailable } from '../utils/multiCamera';
+import { useToast } from '../context/ToastContext';
 
 /**
  * CameraCapture — Cámara fullscreen in-app para captura múltiple rápida.
@@ -17,6 +18,7 @@ import { openNativeMultiCamera, isMultiCameraAvailable } from '../utils/multiCam
  */
 export default function CameraCapture({ isOpen, onClose, onPhotosReady, maxPhotos = 20 }) {
   const nativeCameraLaunched = useRef(false);
+  const toast = useToast();
   const [useWebFallback, setUseWebFallback] = useState(false);
 
   useEffect(() => {
@@ -43,6 +45,12 @@ export default function CameraCapture({ isOpen, onClose, onPhotosReady, maxPhoto
         onClose();
       } catch (err) {
         console.warn('[CameraCapture] Native camera error:', err);
+        // Permiso denegado: avisar y cerrar. No caer al fallback web (pantalla negra).
+        if (err?.code === 'CAMERA_PERMISSION_DENIED' || /permiso de c[aá]mara/i.test(err?.message || '')) {
+          toast.error('Aitems no tiene permiso para usar la cámara. Habilitalo en Ajustes > Aitems > Cámara.');
+          onClose();
+          return;
+        }
         // Si el plugin nativo da error (ej. binario viejo sin compilar), caer al fallback web
         setUseWebFallback(true);
       } finally {

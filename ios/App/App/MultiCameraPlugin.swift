@@ -16,6 +16,27 @@ public class MultiCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func openCamera(_ call: CAPPluginCall) {
         let maxPhotos = call.getInt("maxPhotos") ?? 20
 
+        // Verificar permiso de cámara ANTES de abrir la sesión: sin permiso no hay conexión de video
+        // y capturar una foto hace crashear la app.
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            presentCamera(call: call, maxPhotos: maxPhotos)
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        self?.presentCamera(call: call, maxPhotos: maxPhotos)
+                    } else {
+                        call.reject("Permiso de cámara denegado", "CAMERA_PERMISSION_DENIED")
+                    }
+                }
+            }
+        default:
+            call.reject("Permiso de cámara denegado. Habilitalo en Ajustes.", "CAMERA_PERMISSION_DENIED")
+        }
+    }
+
+    private func presentCamera(call: CAPPluginCall, maxPhotos: Int) {
         DispatchQueue.main.async {
             guard let viewController = self.bridge?.viewController else {
                 call.reject("No se pudo obtener el view controller")
@@ -711,6 +732,14 @@ class MultiCameraViewController: UIViewController {
 
     @objc private func handleCapture() {
         guard !isCapturing, capturedPhotos.count < maxPhotos else { return }
+
+        // Sin sesión activa o sin conexión de video (ej. permiso denegado) capturePhoto lanza una
+        // excepción de Objective-C y cierra la app. Se ignora el toque en ese caso.
+        guard captureSession.isRunning,
+              let activeConnection = photoOutput.connection(with: .video),
+              activeConnection.isEnabled, activeConnection.isActive else {
+            return
+        }
         isCapturing = true
 
         // Flash animation
