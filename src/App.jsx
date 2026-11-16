@@ -3106,11 +3106,34 @@ export default function App() {
             structure: itemType === 'structure'
           }));
         }
-        return [];
+        // Falló el análisis de esta foto: no ocultarlo como "sin ítems"
+        const analysisErr = new Error(res.message || res.error || 'Falló el análisis');
+        analysisErr.photoIndex = photoIdx + 1;
+        throw analysisErr;
       });
 
-      const resultsPerPhoto = await Promise.all(analysisPromises);
-      const allDetectedItems = resultsPerPhoto.flat();
+      const settled = await Promise.allSettled(analysisPromises);
+
+      // Si el plan bloquea el análisis, cortar con ese mensaje
+      const planBlocked = settled.find(r => r.status === 'rejected' && r.reason?.planBlocked);
+      if (planBlocked) throw planBlocked.reason;
+
+      const failedIdx = settled
+        .map((r, i) => (r.status === 'rejected' ? i + 1 : null))
+        .filter(Boolean);
+
+      if (failedIdx.length === settled.length) {
+        toast.error('Falló el análisis de fotos con IA. Intentá de nuevo en unos minutos.');
+        setPhotoItemPhase('upload');
+        return;
+      }
+      if (failedIdx.length > 0) {
+        toast.warning(`No se pudo analizar ${failedIdx.length === 1 ? 'la foto' : 'las fotos'} ${failedIdx.join(', ')}. Podés volver a intentarlo.`);
+      }
+
+      const allDetectedItems = settled
+        .filter(r => r.status === 'fulfilled')
+        .flatMap(r => r.value);
 
       if (allDetectedItems.length === 0) {
         toast.info(`No se identificaron elementos de ${itemType === 'structure' ? 'estructura' : 'mobiliario'} en las fotos analizadas.`);

@@ -6,7 +6,8 @@ export const photoService = {
    * @param {Object} payload - { photo_ids?: string[], photos?: any[], property_id?: string, room?: string, category_id?: string }
    */
   async analyzePhotos(payload) {
-    return await api.post('/api/photos/analyze', payload);
+    // El análisis con IA puede tardar más que el timeout por defecto (12s)
+    return await api.post('/api/photos/analyze', payload, { timeout: 120000 });
   },
 
   /**
