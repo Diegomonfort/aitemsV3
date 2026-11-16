@@ -13,7 +13,6 @@ if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
 }
 
 const API_BASE_URL = cleanUrl;
-console.log('[API] Backend base URL:', API_BASE_URL);
 
 // Función para obtener un token válido (refrescándolo si expiró)
 async function getValidToken() {
@@ -26,7 +25,6 @@ async function getValidToken() {
     const isExpired = expiresAt && (expiresAt < Date.now() + 60000);
 
     if (isExpired) {
-      console.log('[API] Token expirado o por expirar, renovando sesión...');
       const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
       if (!refreshErr && refreshData?.session) {
         session = refreshData.session;

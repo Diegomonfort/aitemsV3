@@ -9,7 +9,6 @@ const nativeAudioListeners = new Set();
 
 if (typeof window !== 'undefined') {
   window.__onNativeAudioEvent = (event, data) => {
-    console.log(`[NativeAudioBridge] Evento recibido: "${event}" (data: ${data ? (typeof data === 'string' ? data.length + ' chars' : typeof data) : 'null'}, listeners: ${nativeAudioListeners.size})`);
     nativeAudioListeners.forEach((listener) => {
       try {
         listener(event, data);
@@ -71,10 +70,6 @@ export function useAudioRecorder() {
     if (!isNative) return;
 
     const handleNativeEvent = (event, data) => {
-      console.log(`[useAudioRecorder] Evento nativo: ${event}`, {
-        isThisRecording: isThisRecordingRef.current,
-        hasResolver: !!resolveStopRef.current
-      });
 
       switch (event) {
         case 'started':
@@ -100,14 +95,12 @@ export function useAudioRecorder() {
 
             if (data && typeof data === 'string' && data.length > 0) {
               try {
-                console.log(`[useAudioRecorder] Decodificando base64 a Blob (${data.length} caracteres)...`);
                 const byteChars = atob(data);
                 const byteArray = new Uint8Array(byteChars.length);
                 for (let i = 0; i < byteChars.length; i++) {
                   byteArray[i] = byteChars.charCodeAt(i);
                 }
                 const audioBlob = new Blob([byteArray], { type: 'audio/m4a' });
-                console.log(`[useAudioRecorder] Blob creado exitosamente: ${audioBlob.size} bytes`);
                 resolver({ audioBlob, mimeType: 'audio/m4a' });
               } catch (e) {
                 console.error('[useAudioRecorder] Error al convertir base64 a Blob:', e);
@@ -167,7 +160,6 @@ export function useAudioRecorder() {
     setRecordingTime(0);
     isThisRecordingRef.current = true;
     try {
-      console.log('[useAudioRecorder] Solicitando inicio de grabación nativa a Swift...');
       window.webkit.messageHandlers.audioRecorder.postMessage({ action: 'start' });
       startTimer();
       setIsRecording(true);
@@ -182,7 +174,6 @@ export function useAudioRecorder() {
 
   const stopRecordingNative = useCallback(() => {
     return new Promise((resolve) => {
-      console.log('[useAudioRecorder] stopRecordingNative invocado');
 
       if (stopTimeoutRef.current) clearTimeout(stopTimeoutRef.current);
       // Timeout de seguridad: 10 segundos máximo para evitar que la UI quede colgada para siempre
@@ -198,7 +189,6 @@ export function useAudioRecorder() {
       resolveStopRef.current = resolve;
 
       try {
-        console.log('[useAudioRecorder] Enviando acción stop a Swift...');
         window.webkit.messageHandlers.audioRecorder.postMessage({ action: 'stop' });
       } catch (err) {
         console.error('[useAudioRecorder] Error al enviar stop a Swift:', err);

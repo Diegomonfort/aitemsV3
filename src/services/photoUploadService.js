@@ -204,7 +204,6 @@ class PhotoUploadService {
       photoItem.result = uploadedData;
       this.completedPhotos++;
 
-      console.log(`[photoUploadService] ✅ Foto subida: ${photoItem.filename} -> ${uploadedData?.url}`);
 
       this.notifyListeners({
         type: 'PHOTO_UPLOADED_SUCCESS',

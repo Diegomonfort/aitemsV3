@@ -1589,9 +1589,7 @@ export default function App() {
     setIsRecording(false);
     setVoicePhase('processing');
     try {
-      console.log('🎤 [handleStopVoiceRecording] Deteniendo grabación...');
       const { audioBlob, mimeType } = await itemAudioRecorder.stopRecording();
-      console.log('🎤 [handleStopVoiceRecording] Audio obtenido:', { size: audioBlob?.size, mimeType });
       if (!audioBlob || audioBlob.size === 0) {
         throw new Error('No se detectó audio grabado. Probá hablar más cerca del micrófono.');
       }
@@ -1614,9 +1612,7 @@ export default function App() {
       formData.append('property_id', propId);
       formData.append('category_id', categoryId);
 
-      console.log('🚀 [handleStopVoiceRecording] Enviando audio a /api/voice/item/process...');
       const res = await voiceService.processVoiceItem(formData);
-      console.log('📥 [handleStopVoiceRecording] Respuesta de voiceService:', res);
       if (!res.success) {
         throw new Error(res.message || res.error || 'Error al procesar los ítems por voz');
       }
@@ -2487,9 +2483,7 @@ export default function App() {
   const handleStopVoiceRoomRecording = async () => {
     setVoiceRoomPhase('processing');
     try {
-      console.log('🎤 [handleStopVoiceRoomRecording] Deteniendo grabación...');
       const { audioBlob, mimeType } = await roomAudioRecorder.stopRecording();
-      console.log('🎤 [handleStopVoiceRoomRecording] Audio obtenido:', { size: audioBlob?.size, mimeType });
       if (!audioBlob || audioBlob.size === 0) {
         throw new Error('No se detectó audio grabado. Probá hablar más cerca del micrófono.');
       }
@@ -2505,9 +2499,7 @@ export default function App() {
       formData.append('user_id', authUser?.id || selectedPropertyDetail?.userId || 'anonymous');
       formData.append('property_id', propId);
 
-      console.log('🚀 [handleStopVoiceRoomRecording] Enviando audio a /api/voice/ambient/process...');
       const res = await voiceService.processVoiceAmbient(formData);
-      console.log('📥 [handleStopVoiceRoomRecording] Respuesta del backend:', res);
       if (!res.success) {
         throw new Error(res.message || res.error || 'Error al procesar los ambientes por voz');
       }
@@ -2735,9 +2727,7 @@ export default function App() {
   const handleStopItemVoiceRecording = async () => {
     setVoiceItemPhase('processing');
     try {
-      console.log('🎤 [handleStopItemVoiceRecording] Deteniendo grabación de ítem...');
       const { audioBlob, mimeType } = await itemAudioRecorder.stopRecording();
-      console.log('🎤 [handleStopItemVoiceRecording] Audio de ítem obtenido:', { size: audioBlob?.size, mimeType });
       if (!audioBlob || audioBlob.size === 0) {
         throw new Error('No se detectó audio grabado. Probá hablar más cerca del micrófono.');
       }
@@ -2761,9 +2751,7 @@ export default function App() {
       formData.append('property_id', propId);
       formData.append('category_id', categoryId);
 
-      console.log('🚀 [handleStopItemVoiceRecording] Enviando audio a /api/voice/item/process...');
       const res = await voiceService.processVoiceItem(formData);
-      console.log('📥 [handleStopItemVoiceRecording] Respuesta de voiceService:', res);
       if (!res.success) {
         throw new Error(res.message || res.error || 'Error al procesar los ítems por voz');
       }

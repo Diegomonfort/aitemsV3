@@ -127,11 +127,6 @@ export async function compressImage(file, maxDimension = MAX_DIMENSION, quality 
               lastModified: Date.now(),
             });
 
-            console.log(
-              `[imageOptimizer] ⚡ "${file.name}" optimizada: ${formatFileSize(file.size)} ➔ ${formatFileSize(compressedFile.size)} (${Math.round(
-                (1 - compressedFile.size / file.size) * 100
-              )}% reducción)`
-            );
 
             resolve({
               file: compressedFile,
